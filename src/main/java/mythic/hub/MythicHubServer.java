@@ -1,5 +1,6 @@
 package mythic.hub;
 
+import mythic.hub.commands.FriendsCommand;
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.entity.Player;
 import net.minestom.server.event.inventory.InventoryPreClickEvent;
@@ -62,7 +63,7 @@ public class MythicHubServer {
         setupDefaultInstance();
 
         // Register commands
-        registerCommands();
+        MinecraftServer.getCommandManager().register(new FriendsCommand());
 
         // Add shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -267,13 +268,72 @@ public class MythicHubServer {
             ItemHandler.onPlayerUseItem(event);
         });
 
+        // Handle item drop prevention
+        globalEventHandler.addListener(net.minestom.server.event.item.ItemDropEvent.class, event -> {
+            // Get the entity that dropped the item (should be a Player)
+            if (event.getEntity() instanceof Player player) {
+                ItemStack droppedItem = event.getItemStack();
+                
+                // Check if trying to drop a hub item
+                if (droppedItem != null && droppedItem.material() != Material.AIR) {
+                    var customName = droppedItem.get(ItemComponent.CUSTOM_NAME);
+                    if (customName != null) {
+                        String itemName = ((net.kyori.adventure.text.TextComponent) customName).content();
+                        if (isHubItem(itemName)) {
+                            event.setCancelled(true);
+                            // Refresh hub items to ensure they're in the correct slots
+                            mythic.hub.handlers.HubItems.giveHubItems(player);
+                        }
+                    }
+                }
+            }
+        });
+
         // Handle inventory pre-clicks (this can be cancelled)
         globalEventHandler.addListener(InventoryPreClickEvent.class, event -> {
             Player player = event.getPlayer();
             ItemStack clickedItem = event.getClickedItem();
-
-            // Prevent moving items in custom inventories (check if it's NOT the player's inventory)
-            if (!event.getInventory().equals(player.getInventory())) {
+            
+            // Check if this is a player's inventory interaction
+            if (event.getInventory() == null || event.getInventory().equals(player.getInventory())) {
+                // This is the player's own inventory - check if they're trying to move hub items
+                if (clickedItem != null && clickedItem.material() != Material.AIR) {
+                    var customName = clickedItem.get(ItemComponent.CUSTOM_NAME);
+                    if (customName != null) {
+                        String itemName = ((net.kyori.adventure.text.TextComponent) customName).content();
+                        
+                        // Check if this is a hub item that shouldn't be moved
+                        if (isHubItem(itemName)) {
+                            event.setCancelled(true);
+                            return;
+                        }
+                    }
+                }
+                
+                // ADDITIONAL CHECK: Handle number key swaps (1-9 keys)
+                // Check if they're trying to swap with a hub item slot
+                if (event.getSlot() >= 9) { // Only check inventory slots (not hotbar)
+                    int hotbarSlot = -1;
+                    
+                    // This is tricky - we need to check if they pressed a number key
+                    // For now, let's check all hotbar slots for hub items and cancel if any exist
+                    for (int i = 0; i <= 8; i++) {
+                        ItemStack hotbarItem = player.getInventory().getItemStack(i);
+                        if (hotbarItem != null && hotbarItem.material() != Material.AIR) {
+                            var customName = hotbarItem.get(ItemComponent.CUSTOM_NAME);
+                            if (customName != null) {
+                                String itemName = ((net.kyori.adventure.text.TextComponent) customName).content();
+                                if (isHubItem(itemName)) {
+                                    // Found a hub item in hotbar - cancel any inventory click that could swap with it
+                                    event.setCancelled(true);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // This is a custom inventory (GUI) - prevent all interactions
                 event.setCancelled(true);
 
                 if (clickedItem != null && clickedItem.material() != Material.AIR) {
@@ -304,13 +364,11 @@ public class MythicHubServer {
 
     private static void startUpdaters() {
         // Scoreboard updater
-        // In your initialization method, change the scheduler interval
-        // Instead of updating every second (1000ms), update every 5 seconds (5000ms)
         scheduler.scheduleAtFixedRate(() -> {
             if (scoreboardManager != null) {
                 scoreboardManager.updateAllScoreboards();
             }
-        }, 1, 5, TimeUnit.SECONDS); // Changed from 1 second to 5 seconds
+        }, 1, 5, TimeUnit.SECONDS);
 
         // Tab list updater (less frequent)
         scheduler.scheduleAtFixedRate(() -> {
@@ -318,7 +376,79 @@ public class MythicHubServer {
                 tabListManager.updateAllTabLists();
             }
         }, 5, 5, TimeUnit.SECONDS);
+        
+        // Start hub item monitor
+        startHubItemMonitor();
 
         System.out.println("All updaters started!");
+    }
+
+    // Helper method to check if an item is a hub item that shouldn't be moved
+    private static boolean isHubItem(String itemName) {
+        return itemName.equals("Server Selector") ||
+               itemName.equals("Player Settings") ||
+               itemName.equals("Cosmetics") ||
+               itemName.startsWith("Player Visibility:") ||
+               itemName.equals("Profile");
+    }
+    private static void startHubItemMonitor() {
+        // Monitor and fix hub item positions every 500ms
+        scheduler.scheduleAtFixedRate(() -> {
+            for (Player player : MinecraftServer.getConnectionManager().getOnlinePlayers()) {
+                ensureHubItemsInCorrectSlots(player);
+            }
+        }, 500, 500, TimeUnit.MILLISECONDS);
+    }
+    
+    private static void ensureHubItemsInCorrectSlots(Player player) {
+        // Expected hub item positions
+        int[] hubSlots = {0, 1, 4, 7, 8};
+        String[] expectedItems = {"Server Selector", "Player Settings", "Cosmetics", "Player Visibility:", "Profile"};
+        
+        boolean needsRefresh = false;
+        
+        for (int i = 0; i < hubSlots.length; i++) {
+            int slot = hubSlots[i];
+            String expectedItem = expectedItems[i];
+            
+            ItemStack currentItem = player.getInventory().getItemStack(slot);
+            
+            // Check if the correct hub item is in the correct slot
+            if (currentItem == null || currentItem.material() == Material.AIR) {
+                needsRefresh = true;
+                break;
+            }
+            
+            var customName = currentItem.get(ItemComponent.CUSTOM_NAME);
+            if (customName == null) {
+                needsRefresh = true;
+                break;
+            }
+            
+            String itemName = ((net.kyori.adventure.text.TextComponent) customName).content();
+            if (!itemName.equals(expectedItem) && !itemName.startsWith(expectedItem)) {
+                needsRefresh = true;
+                break;
+            }
+        }
+        
+        // Also check if hub items are in wrong slots (moved to inventory)
+        for (int slot = 9; slot < 36; slot++) { // Check main inventory (not hotbar)
+            ItemStack item = player.getInventory().getItemStack(slot);
+            if (item != null && item.material() != Material.AIR) {
+                var customName = item.get(ItemComponent.CUSTOM_NAME);
+                if (customName != null) {
+                    String itemName = ((net.kyori.adventure.text.TextComponent) customName).content();
+                    if (isHubItem(itemName)) {
+                        needsRefresh = true;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (needsRefresh) {
+            mythic.hub.handlers.HubItems.giveHubItems(player);
+        }
     }
 }

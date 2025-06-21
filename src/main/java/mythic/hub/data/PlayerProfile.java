@@ -17,6 +17,9 @@ public class PlayerProfile {
     private volatile Rank cachedHighestRank;
     private volatile long lastCacheUpdate = -1;
     private static final long CACHE_DURATION = 30000; // 30 seconds
+    // Add these fields to your PlayerProfile class
+    private List<UUID> friends = new ArrayList<>();
+    private List<UUID> friendRequests = new ArrayList<>();
 
     public PlayerProfile(UUID uuid, String username) {
         this.uuid = uuid;
@@ -104,4 +107,55 @@ public class PlayerProfile {
     public List<Permission> getPermissions() { return new ArrayList<>(permissions); } // Defensive copy
     public List<Rank> getRanks() { return new ArrayList<>(ranks); } // Defensive copy
     public Map<String, Object> getAdditionalData() { return new HashMap<>(additionalData); } // Defensive copy
+
+    // Add these methods to your PlayerProfile class
+    public List<UUID> getFriends() {
+        return friends != null ? friends : new ArrayList<>();
+    }
+
+    public void setFriends(List<UUID> friends) {
+        this.friends = friends != null ? friends : new ArrayList<>();
+    }
+
+    public void addFriend(UUID friendUuid) {
+        if (friends == null) {
+            friends = new ArrayList<>();
+        }
+        if (!friends.contains(friendUuid)) {
+            friends.add(friendUuid);
+        }
+    }
+
+    public void removeFriend(UUID friendUuid) {
+        if (friends != null) {
+            friends.remove(friendUuid);
+        }
+    }
+
+    public List<UUID> getFriendRequests() {
+        return friendRequests != null ? friendRequests : new ArrayList<>();
+    }
+
+    public void setFriendRequests(List<UUID> friendRequests) {
+        this.friendRequests = friendRequests != null ? friendRequests : new ArrayList<>();
+    }
+
+    public void addFriendRequest(UUID requesterUuid) {
+        if (friendRequests == null) {
+            friendRequests = new ArrayList<>();
+        }
+        if (!friendRequests.contains(requesterUuid)) {
+            friendRequests.add(requesterUuid);
+        }
+    }
+
+    public void removeFriendRequest(UUID requesterUuid) {
+        if (friendRequests != null) {
+            friendRequests.remove(requesterUuid);
+        }
+    }
+
+    public boolean hasPendingFriendRequest(UUID requesterUuid) {
+        return friendRequests != null && friendRequests.contains(requesterUuid);
+    }
 }

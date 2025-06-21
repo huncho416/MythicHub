@@ -62,7 +62,7 @@ public class ItemHandler {
 
     private static int getSlotOfItem(Player player, ItemStack item) {
         Material itemMaterial = item.material();
-        for (int i = 0; i < 9; i++) {
+        for (int i = 0; i < 9; i++) {  // Fixed: added 'i' before the '<' operator
             ItemStack slotItem = player.getInventory().getItemStack(i);
             if (slotItem != null && slotItem.material() == itemMaterial) {
                 return i;
@@ -72,60 +72,86 @@ public class ItemHandler {
     }
 
     private static void handleServerSelector(Player player) {
+
         Inventory serverMenu = new Inventory(InventoryType.CHEST_3_ROW,
                 Component.text("Server Selector")
                         .color(LIGHT_PINK)
                         .decoration(TextDecoration.BOLD, true));
 
-        // Pre-create common lore components
+
+        TextColor LIGHT_BLUE = TextColor.color(173, 216, 230);
+        TextColor DARK_BLUE = NamedTextColor.DARK_BLUE;
+        TextColor LIGHT_RED = NamedTextColor.RED; // Changed to use &c (NamedTextColor.RED)
+        TextColor DARK_RED = NamedTextColor.DARK_RED; // Dark red for Gens player count
+        TextColor LIGHT_GREEN = NamedTextColor.GREEN;
+        TextColor DARK_GREEN = NamedTextColor.DARK_GREEN;
+
+
+        int prisonPlayers = getServerPlayerCount("Prison");
+        int gensPlayers = getServerPlayerCount("Gens");
+        int skyblockPlayers = getServerPlayerCount("Skyblock");
+
+
         Component playersOnlineText = Component.text("Players Online: ").color(WHITE).decoration(TextDecoration.ITALIC, false);
 
-        // KitPvP Server
-        ItemStack kitpvp = ItemStack.builder(Material.IRON_SWORD)
-                .customName(Component.text("KitPvP").color(LIGHT_PINK).decoration(TextDecoration.ITALIC, false))
+
+        ItemStack prison = ItemStack.builder(Material.IRON_BARS)
+                .customName(Component.text("Prison").color(LIGHT_BLUE).decoration(TextDecoration.ITALIC, false))
                 .lore(List.of(
-                        Component.text("Classic PvP with kits!").color(GRAY).decoration(TextDecoration.ITALIC, false),
+                        Component.text("Mine, rankup, and dominate!").color(GRAY).decoration(TextDecoration.ITALIC, false),
                         EMPTY_COMPONENT,
-                        playersOnlineText.append(Component.text("42").color(GREEN)),
+                        playersOnlineText.append(Component.text(String.valueOf(prisonPlayers)).color(DARK_BLUE)),
                         EMPTY_COMPONENT,
                         CLICK_TO_JOIN
                 ))
                 .build();
 
-        // Survival Server
-        ItemStack survival = ItemStack.builder(Material.GRASS_BLOCK)
-                .customName(Component.text("Survival").color(GREEN).decoration(TextDecoration.ITALIC, false))
+
+        ItemStack gens = ItemStack.builder(Material.SPAWNER)
+                .customName(Component.text("Gens").color(LIGHT_RED).decoration(TextDecoration.ITALIC, false))
                 .lore(List.of(
-                        Component.text("Classic survival experience!").color(GRAY).decoration(TextDecoration.ITALIC, false),
+                        Component.text("Generate resources and build!").color(GRAY).decoration(TextDecoration.ITALIC, false),
                         EMPTY_COMPONENT,
-                        playersOnlineText.append(Component.text("18").color(GREEN)),
+                        playersOnlineText.append(Component.text(String.valueOf(gensPlayers)).color(DARK_RED)),
                         EMPTY_COMPONENT,
                         CLICK_TO_JOIN
                 ))
                 .build();
 
-        // Creative Server
-        ItemStack creative = ItemStack.builder(Material.COMMAND_BLOCK)
-                .customName(Component.text("Creative").color(NamedTextColor.AQUA).decoration(TextDecoration.ITALIC, false))
+
+        ItemStack skyblock = ItemStack.builder(Material.GRASS_BLOCK)
+                .customName(Component.text("Skyblock").color(LIGHT_GREEN).decoration(TextDecoration.ITALIC, false))
                 .lore(List.of(
-                        Component.text("Build anything you want!").color(GRAY).decoration(TextDecoration.ITALIC, false),
+                        Component.text("Start from nothing, build everything!").color(GRAY).decoration(TextDecoration.ITALIC, false),
                         EMPTY_COMPONENT,
-                        playersOnlineText.append(Component.text("7").color(GREEN)),
+                        playersOnlineText.append(Component.text(String.valueOf(skyblockPlayers)).color(DARK_GREEN)),
                         EMPTY_COMPONENT,
                         CLICK_TO_JOIN
                 ))
                 .build();
 
-        ItemStack back = ItemStack.builder(Material.BARRIER)
-                .customName(CLOSE_TEXT)
-                .build();
 
-        serverMenu.setItemStack(10, kitpvp);
-        serverMenu.setItemStack(12, survival);
-        serverMenu.setItemStack(14, creative);
-        serverMenu.setItemStack(22, back);
+        serverMenu.setItemStack(10, prison);   // Middle row, second position
+        serverMenu.setItemStack(13, gens);     // Middle row, fourth position  
+        serverMenu.setItemStack(16, skyblock); // Middle row, sixth position
 
         player.openInventory(serverMenu);
+    }
+
+    private static int getServerPlayerCount(String serverName) {
+        // Mock implementation - replace with actual server communication
+        // You'll need to implement Redis communication or BungeeCord plugin messaging
+        // to get real player counts from other servers
+        switch (serverName.toLowerCase()) {
+            case "prison":
+                return 42; // Mock data
+            case "gens":
+                return 28; // Mock data
+            case "skyblock":
+                return 35; // Mock data
+            default:
+                return 0;
+        }
     }
 
     private static void handlePlayerSettings(Player player) {
@@ -283,4 +309,56 @@ public class ItemHandler {
     public static void resetPlayerVisibility(Player player) {
         playerVisibility.remove(player);
     }
+// Add this to your onPlayerUseItem method in the switch statement or if-else chain
+// Add this method to handle friends functionality
+private static void handleFriends(Player player) {
+    player.playSound(CLICK_SOUND);
+    
+    Inventory friendsInventory = new Inventory(InventoryType.CHEST_6_ROW, Component.text("Friends")
+            .color(LIGHT_PINK)
+            .decoration(TextDecoration.ITALIC, false));
+
+    // You'll need to implement FriendManager or use your existing friend system
+    // Example structure for the friends GUI:
+    
+    // Friends list section
+    // TODO: Integrate with your FriendManager to get actual friends
+    // List<Friend> friends = FriendManager.getFriends(player.getUuid());
+    
+    // Friend requests section
+    // TODO: Integrate with your FriendManager to get pending requests
+    // List<FriendRequest> requests = FriendManager.getPendingRequests(player.getUuid());
+    
+    // Add friend button
+    ItemStack addFriend = ItemStack.builder(Material.GREEN_WOOL)
+            .customName(Component.text("Add Friend")
+                    .color(GREEN)
+                    .decoration(TextDecoration.ITALIC, false))
+            .lore(List.of(Component.text("Click to add a new friend")
+                    .color(GRAY)
+                    .decoration(TextDecoration.ITALIC, false)))
+            .build();
+    
+    // Settings button
+    ItemStack friendSettings = ItemStack.builder(Material.GRAY_WOOL)
+            .customName(Component.text("Friend Settings")
+                    .color(WHITE)
+                    .decoration(TextDecoration.ITALIC, false))
+            .lore(List.of(Component.text("Manage friend preferences")
+                    .color(GRAY)
+                    .decoration(TextDecoration.ITALIC, false)))
+            .build();
+    
+    // Close button
+    ItemStack close = ItemStack.builder(Material.BARRIER)
+            .customName(CLOSE_TEXT)
+            .build();
+    
+    // Set items in inventory
+    friendsInventory.setItemStack(45, addFriend);
+    friendsInventory.setItemStack(49, friendSettings);
+    friendsInventory.setItemStack(53, close);
+    
+    player.openInventory(friendsInventory);
+}
 }

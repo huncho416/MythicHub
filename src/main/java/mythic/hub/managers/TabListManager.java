@@ -21,7 +21,7 @@ public class TabListManager {
     private final TextColor LIGHT_PINK = TextColor.color(255, 182, 193);
     private final TextColor WHITE = NamedTextColor.WHITE;
     private final TextColor GRAY = NamedTextColor.GRAY;
-    private final TextColor GOLD = NamedTextColor.GOLD;
+    private final TextColor DARK_GRAY = NamedTextColor.DARK_GRAY;
     
     private final ConcurrentHashMap<Player, Component> playerDisplayNames = new ConcurrentHashMap<>();
 
@@ -41,33 +41,41 @@ public class TabListManager {
     }
 
     private void updateHeaderFooter(Player player) {
+        // Get server name from system properties or default
+        String serverName = System.getProperty("server.name", "Hub-1");
+        
+        // Calculate values for footer
+        int currentServerPlayers = MinecraftServer.getConnectionManager().getOnlinePlayers().size();
+        int globalPlayers = getGlobalPlayerCount(); // You'll need to implement this
+        int hubPlayers = getHubPlayerCount(); // You'll need to implement this
+        int playerPing = player.getLatency();
+        double serverTps = getServerTps(); // You'll need to implement this
+        
+        // Header - final positioning adjustments
         Component header = Component.text()
-                .append(Component.text("▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬").color(GRAY))
-                .append(Component.newline())
-                .append(Component.text("    ").append(Component.text("MYTHIC").color(LIGHT_PINK).decorate(TextDecoration.BOLD))
+                .append(Component.text("     ").append(Component.text("MYTHIC").color(LIGHT_PINK).decorate(TextDecoration.BOLD))
                         .append(Component.text("PVP").color(WHITE).decorate(TextDecoration.BOLD)))
                 .append(Component.newline())
-                .append(Component.text("    Welcome to the Hub, ").color(GRAY)
-                        .append(getPlayerRankAndName(player)).append(Component.text("!").color(GRAY)))
+                .append(Component.newline()) // Blank line
+                .append(Component.text("     ").append(Component.text("Connected to: ").color(WHITE))
+                        .append(Component.text(serverName).color(LIGHT_PINK)))
                 .append(Component.newline())
-                .append(Component.text("▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬").color(GRAY))
+                .append(Component.text("      ").append(Component.text("play.mythicpvp.net").color(GRAY)))
                 .build();
 
-        int onlinePlayers = MinecraftServer.getConnectionManager().getOnlinePlayers().size();
-        
+        // Footer - updated hub player text
         Component footer = Component.text()
-                .append(Component.text("▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬").color(GRAY))
+                .append(Component.text("Ping: ").color(LIGHT_PINK)
+                        .append(Component.text(playerPing + "ms").color(WHITE))
+                        .append(Component.text(" * ").color(DARK_GRAY))
+                        .append(Component.text("TPS: ").color(LIGHT_PINK))
+                        .append(Component.text(String.format("%.1f", serverTps)).color(WHITE))
+                        .append(Component.text(" * ").color(DARK_GRAY))
+                        .append(Component.text("store.mythicpvp.net").color(LIGHT_PINK)))
                 .append(Component.newline())
-                .append(Component.text("    Online Players: ").color(WHITE)
-                        .append(Component.text(onlinePlayers).color(LIGHT_PINK)))
-                .append(Component.newline())
-                .append(Component.text("    Server: ").color(WHITE)
-                        .append(Component.text("play.mythicpvp.net").color(GOLD)))
-                .append(Component.newline())
-                .append(Component.text("    Discord: ").color(WHITE)
-                        .append(Component.text("discord.gg/mythicpvp").color(LIGHT_PINK)))
-                .append(Component.newline())
-                .append(Component.text("▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬").color(GRAY))
+                .append(Component.text(String.valueOf(globalPlayers)).color(LIGHT_PINK)
+                        .append(Component.text(" Global").color(WHITE))
+                        .append(Component.text(" (" + hubPlayers + " on all hubs)").color(GRAY)))
                 .build();
 
         player.sendPacket(new PlayerListHeaderAndFooterPacket(header, footer));
@@ -143,17 +151,16 @@ public class TabListManager {
         
         if (profile != null) {
             Rank highestRank = getHighestPriorityRank(profile);
-            if (highestRank != null) {
+            if (highestRank != null && !highestRank.getName().equalsIgnoreCase("DEFAULT") && !highestRank.getName().equalsIgnoreCase("MEMBER")) {
                 RankConfig.RankInfo rankInfo = RankConfig.getRankInfo(highestRank.getName());
                 return Component.text("[" + highestRank.getName() + "] ")
                         .color(rankInfo.getColor())
-                        .append(Component.text(player.getUsername()).color(WHITE));
+                        .append(Component.text(player.getUsername()).color(rankInfo.getColor()));
             }
         }
         
-        // Default display
-        return Component.text("[MEMBER] ").color(GRAY)
-                .append(Component.text(player.getUsername()).color(WHITE));
+        // Default display (no prefix for default/member ranks)
+        return Component.text(player.getUsername()).color(GRAY);
     }
 
     private Rank getHighestPriorityRank(PlayerProfile profile) {
@@ -195,5 +202,24 @@ public class TabListManager {
         MinecraftServer.getConnectionManager().getOnlinePlayers().forEach(onlinePlayer -> {
             onlinePlayer.sendPacket(packet);
         });
+    }
+
+    // Helper methods - you'll need to implement these based on your server architecture
+    private int getGlobalPlayerCount() {
+        // TODO: Implement Redis-based global player count
+        // For now, return current server count as placeholder
+        return MinecraftServer.getConnectionManager().getOnlinePlayers().size();
+    }
+
+    private int getHubPlayerCount() {
+        // TODO: Implement Redis-based hub player count (all hub servers combined)
+        // For now, return current server count as placeholder
+        return MinecraftServer.getConnectionManager().getOnlinePlayers().size();
+    }
+
+    private double getServerTps() {
+        // TODO: Implement TPS calculation
+        // For now, return 20.0 as placeholder
+        return 20.0;
     }
 }

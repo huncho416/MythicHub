@@ -31,6 +31,9 @@ public class HubItems {
     private static final Component SERVER_SELECTOR_LORE = Component.text("Right-click to open server menu")
             .color(NamedTextColor.GRAY)
             .decoration(TextDecoration.ITALIC, false);
+    private static final Component FRIENDS_LORE = Component.text("Right-click to manage friends")
+            .color(NamedTextColor.GRAY)
+            .decoration(TextDecoration.ITALIC, false);
 
     // Cache for player skins to avoid repeated API calls
     private static final ConcurrentHashMap<String, PlayerSkin> skinCache = new ConcurrentHashMap<>();
@@ -41,6 +44,7 @@ public class HubItems {
         // Pre-build items for better performance
         ItemStack serverSelector = createServerSelector();
         ItemStack playerSettings = createPlayerSettings();
+        ItemStack friends = createFriends();
         ItemStack cosmetics = createCosmetics();
         ItemStack playerHider = createPlayerHider();
         ItemStack profile = createProfile(player);
@@ -48,6 +52,7 @@ public class HubItems {
         // Set items in inventory
         player.getInventory().setItemStack(0, serverSelector);
         player.getInventory().setItemStack(1, playerSettings);
+        player.getInventory().setItemStack(2, friends);
         player.getInventory().setItemStack(4, cosmetics);
         player.getInventory().setItemStack(7, playerHider);
         player.getInventory().setItemStack(8, profile);
@@ -68,6 +73,15 @@ public class HubItems {
                         .color(LIGHT_PINK)
                         .decoration(TextDecoration.ITALIC, false))
                 .lore(List.of(SETTINGS_LORE))
+                .build();
+    }
+
+    private static ItemStack createFriends() {
+        return ItemStack.builder(Material.EMERALD)
+                .customName(Component.text("Friends")
+                        .color(LIGHT_PINK)
+                        .decoration(TextDecoration.ITALIC, false))
+                .lore(List.of(FRIENDS_LORE))
                 .build();
     }
 
