@@ -94,7 +94,14 @@ public class ChatCommands extends Command {
     }
     
     private boolean isPlayerStaff(Player player) {
-        // Check if player is staff - implement based on your permission system
-        return "Expenses".equals(player.getUsername()); // Placeholder
+        // Check if player is staff using Radium permissions
+        try {
+            return MythicHubServer.getInstance().getRadiumClient()
+                    .hasPermission(player.getUuid(), "mythic.staff")
+                    .get();
+        } catch (Exception e) {
+            System.err.println("Error checking staff permission for " + player.getUsername() + ": " + e.getMessage());
+            return false;
+        }
     }
 }

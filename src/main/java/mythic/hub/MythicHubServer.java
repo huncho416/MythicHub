@@ -1,6 +1,7 @@
 package mythic.hub;
 
 import mythic.hub.commands.FriendsCommand;
+import mythic.hub.commands.ServerCommand;
 import net.minestom.server.MinecraftServer;
 import net.minestom.server.entity.Player;
 import net.minestom.server.event.inventory.InventoryPreClickEvent;
@@ -9,7 +10,6 @@ import net.minestom.server.event.player.PlayerSpawnEvent;
 import net.minestom.server.event.player.PlayerDisconnectEvent;
 import net.minestom.server.event.player.PlayerUseItemEvent;
 import net.minestom.server.event.player.PlayerChatEvent;
-import net.minestom.server.extras.MojangAuth;
 import net.minestom.server.instance.InstanceContainer;
 import net.minestom.server.instance.LightingChunk;
 import net.minestom.server.instance.block.Block;
@@ -19,13 +19,18 @@ import net.minestom.server.item.Material;
 import mythic.hub.commands.ChatCommands;
 import mythic.hub.commands.TagCommand;
 import mythic.hub.config.DatabaseConfig;
+import mythic.hub.config.VelocityConfig;
+import mythic.hub.config.VersionConfig;
+import mythic.hub.config.ProxyConfig;
 import mythic.hub.handlers.ItemHandler;
 import mythic.hub.handlers.PlayerHandler;
 import mythic.hub.managers.ChatManager;
 import mythic.hub.managers.PlayerDataManager;
+import mythic.hub.managers.ProxyManager;
 import mythic.hub.managers.ScoreboardManager;
 import mythic.hub.managers.ServerManager;
 import mythic.hub.managers.TabListManager;
+import mythic.hub.integrations.radium.RadiumClient;
 import mythic.hub.world.HubWorld;
 
 import java.util.concurrent.Executors;
@@ -43,6 +48,8 @@ public class MythicHubServer {
     private static PlayerDataManager playerDataManager;
     private static ServerManager serverManager;
     private static ChatManager chatManager;
+    private static ProxyManager proxyManager;
+    private static RadiumClient radiumClient;
     private static ScheduledExecutorService scheduler;
     private static InstanceContainer hubInstance;
 
@@ -56,14 +63,25 @@ public class MythicHubServer {
         // Initialize managers
         instance.initializeManagers();
 
-        // Setup authentication BEFORE instance setup for proper skin loading
-        MojangAuth.init();
+        // Enable modern forwarding for Velocity proxy support (conditional)
+        ProxyConfig proxyConfig = new ProxyConfig();
+        proxyConfig.initialize();
+        
+        if (proxyConfig.isVelocityForwardingEnabled()) {
+            // Enable Velocity forwarding - requires connecting through proxy (port 25565)
+            net.minestom.server.extras.velocity.VelocityProxy.enable(proxyConfig.getVelocitySecret());
+            System.out.println("Velocity forwarding enabled - connect via proxy on port 25565");
+        } else {
+            // Direct connection mode - connect directly to MythicHub (port 25566)
+            System.out.println("Direct connection mode - connect directly to port 25566");
+        }
 
         // Setup the default instance
         setupDefaultInstance();
 
         // Register commands
         MinecraftServer.getCommandManager().register(new FriendsCommand());
+        MinecraftServer.getCommandManager().register(new ServerCommand());
 
         // Add shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -74,11 +92,14 @@ public class MythicHubServer {
             if (serverManager != null) {
                 serverManager.shutdown();
             }
+            if (proxyManager != null) {
+                proxyManager.shutdown();
+            }
         }));
 
         // Start the server
-        server.start("0.0.0.0", 25565);
-        System.out.println("MythicPvP Hub Server started successfully!");
+        server.start("0.0.0.0", 25566);
+        System.out.println("MythicPvP Hub Server started successfully on port 25566!");
     }
 
     // Add getInstance method using same logic pattern
@@ -90,8 +111,13 @@ public class MythicHubServer {
     private void initializeManagers() {
         System.out.println("Initializing managers...");
 
+        // Initialize version configuration first
+        VersionConfig versionConfig = new VersionConfig();
+        versionConfig.initialize();
+
         // Initialize database configuration
         DatabaseConfig databaseConfig = new DatabaseConfig();
+        VelocityConfig velocityConfig = new VelocityConfig();
 
         // Initialize managers
         scoreboardManager = new ScoreboardManager();
@@ -102,6 +128,12 @@ public class MythicHubServer {
         // Initialize server manager with server name
         String serverName = System.getProperty("server.name", "Hub-1"); // Can be set via JVM args
         serverManager = new ServerManager(playerDataManager.getRedisManager(), serverName);
+
+        // Initialize proxy manager for Velocity integration
+        proxyManager = new ProxyManager(playerDataManager.getRedisManager(), velocityConfig);
+
+        // Initialize Radium client for integration with Radium backend
+        radiumClient = new RadiumClient(playerDataManager.getRedisManager());
 
         scheduler = Executors.newScheduledThreadPool(3);
 
@@ -140,6 +172,14 @@ public class MythicHubServer {
 
     public ChatManager getChatManager() {
         return chatManager;
+    }
+
+    public ProxyManager getProxyManager() {
+        return proxyManager;
+    }
+
+    public RadiumClient getRadiumClient() {
+        return radiumClient;
     }
 
     public ScheduledExecutorService getScheduler() {
@@ -196,11 +236,18 @@ public class MythicHubServer {
 
             // Load player data asynchronously
             playerDataManager.loadPlayer(player).thenAccept(profile -> {
-                System.out.println("Loaded profile for " + player.getUsername() +
-                        " - Permissions: " + profile.getActivePermissions().size() +
-                        ", Ranks: " + profile.getActiveRanks().size());
+                System.out.println("Loaded profile for " + player.getUsername());
             });
 
+            PlayerHandler.onPlayerConfiguration(event);
+        });
+
+        // Add version compatibility handler
+        globalEventHandler.addListener(AsyncPlayerConfigurationEvent.class, event -> {
+            Player player = event.getPlayer();
+            System.out.println("Player " + player.getUsername() + " connecting with protocol version: " + player.getPlayerConnection().getProtocolVersion());
+            
+            // Call the existing handler
             PlayerHandler.onPlayerConfiguration(event);
         });
 

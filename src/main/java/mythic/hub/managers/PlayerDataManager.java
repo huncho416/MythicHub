@@ -34,9 +34,7 @@ public class PlayerDataManager {
                 .thenApply(profile -> {
                     if (profile != null) {
                         playerCache.put(uuid, profile);
-                        System.out.println("Loaded player profile for " + username + " with " +
-                                profile.getActivePermissions().size() + " permissions and " +
-                                profile.getActiveRanks().size() + " ranks");
+                        System.out.println("Loaded player profile for " + username);
                     } else {
                         // Create default profile if not found
                         profile = new PlayerProfile(uuid, username);
@@ -65,16 +63,6 @@ public class PlayerDataManager {
 
     public void unloadPlayer(Player player) {
         unloadPlayer(player.getUuid());
-    }
-
-    public boolean hasPermission(Player player, String permission) {
-        PlayerProfile profile = getPlayer(player);
-        return profile != null && profile.hasPermission(permission);
-    }
-
-    public boolean hasRank(Player player, String rank) {
-        PlayerProfile profile = getPlayer(player);
-        return profile != null && profile.hasRank(rank);
     }
 
     // Add this getter method for RedisManager

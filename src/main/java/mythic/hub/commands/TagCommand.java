@@ -79,9 +79,14 @@ public class TagCommand extends Command {
     }
 
     private boolean hasTagPermission(Player player) {
-        // Check if player has permission to manage tags
-        // You can integrate this with your permission system
-        return MythicHubServer.getInstance().getPlayerDataManager().hasPermission(player, "mythic.tag.manage") ||
-                player.hasPermission("mythic.tag.manage");
+        // Check if player has permission to manage tags using Radium
+        try {
+            return MythicHubServer.getInstance().getRadiumClient()
+                    .hasPermission(player.getUuid(), "mythic.tag.manage")
+                    .get();
+        } catch (Exception e) {
+            System.err.println("Error checking tag permission for " + player.getUsername() + ": " + e.getMessage());
+            return false;
+        }
     }
 }

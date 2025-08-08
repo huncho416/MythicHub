@@ -15,12 +15,12 @@ public class DatabaseConfig {
 
     public DatabaseConfig() {
         // Load configuration from resources or use default values
-        this.mongoHost = "34.174.89.110";
+        this.mongoHost = "localhost";
         this.mongoPort = 27017;
-        this.redisHost = "34.174.89.110";
+        this.redisHost = "localhost";
         this.redisPort = 6379;
         this.redisUsername = "default";
-        this.redisPassword = "mysecretpassword";
+        this.redisPassword = "password";
     }
 
     // Getters

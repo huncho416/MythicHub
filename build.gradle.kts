@@ -9,15 +9,21 @@ version = "1.0-SNAPSHOT"
 repositories {
     mavenCentral()
     maven("https://jitpack.io")
+    maven("https://repo.papermc.io/repository/maven-public/")
 }
 
 dependencies {
+    // Minestom core - stable working version (supports 1.20.6+)
     implementation("com.github.Minestom:Minestom:3172039f39")
     implementation("org.slf4j:slf4j-simple:2.0.9")
 
     // Database dependencies
     implementation("org.mongodb:mongodb-driver-sync:4.11.1")
     implementation("io.lettuce:lettuce-core:6.3.0.RELEASE")
+
+    // Velocity proxy support
+    implementation("com.velocitypowered:velocity-api:3.2.0-SNAPSHOT")
+    compileOnly("com.velocitypowered:velocity-api:3.2.0-SNAPSHOT")
 
     // Configuration
     implementation("org.yaml:snakeyaml:2.2")

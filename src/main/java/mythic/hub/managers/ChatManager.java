@@ -87,85 +87,9 @@ public class ChatManager {
         String message = event.getMessage();
         
         // Check if chat is locked and player can chat
-        if (!canPlayerChat(player)) {
-            event.setCancelled(true);
-            
-            // Send message to player that chat is locked
-            player.sendMessage(Component.text("Chat is currently locked! Only staff members can type.")
-                .color(NamedTextColor.RED));
-            return;
-        }
-        
-        // Format the chat message with tags and ranks
-        Component formattedMessage = formatChatMessage(player, message);
-        if (formattedMessage != null) {
-            // Cancel the event and send the formatted message manually
-            event.setCancelled(true);
-            broadcastToAll(formattedMessage);
-        }
-    }
-    
-    /**
-     * Formats a chat message with player tags and ranks
-     * @param player The player sending the message
-     * @param message The message content
-     * @return The formatted message component
-     */
-    private Component formatChatMessage(Player player, String message) {
-        Component formattedMessage = Component.empty();
-        
-        // Get player's highest rank
-        String playerRank = getPlayerHighestRank(player);
-        RankConfig.RankInfo rankInfo = RankConfig.getRankInfo(playerRank);
-        
-        // Add rank prefix if not default
-        if (!"DEFAULT".equals(playerRank.toUpperCase()) && !"MEMBER".equals(playerRank.toUpperCase())) {
-            formattedMessage = formattedMessage.append(
-                Component.text("[" + playerRank + "] ")
-                    .color(rankInfo.getColor())
-            );
-        }
-        
-        // Add custom tag if player has one
-        String tag = getPlayerTag(player);
-        if (tag != null && !tag.isEmpty()) {
-            formattedMessage = formattedMessage.append(Component.text("[" + tag + "] ").color(NamedTextColor.LIGHT_PURPLE));
-        }
-        
-        // Add player name with rank color
-        formattedMessage = formattedMessage.append(Component.text(player.getUsername()).color(rankInfo.getColor()));
-        
-        // Add separator and message
-        formattedMessage = formattedMessage.append(Component.text(": ").color(NamedTextColor.GRAY));
-        formattedMessage = formattedMessage.append(Component.text(message).color(NamedTextColor.WHITE));
-        
-        return formattedMessage;
-    }
-    
-    /**
-     * Gets the player's highest rank
-     * @param player The player to get the rank for
-     * @return The player's highest rank name
-     */
-    private String getPlayerHighestRank(Player player) {
-        try {
-            PlayerProfile profile = getPlayerProfile(player);
-            if (profile != null) {
-                // Get the highest priority rank from the player's active ranks
-                return profile.getActiveRanks().stream()
-                    .map(rank -> rank.getName().toUpperCase())
-                    .max((rank1, rank2) -> Integer.compare(
-                        RankConfig.getRankInfo(rank1).getPriority(),
-                        RankConfig.getRankInfo(rank2).getPriority()
-                    ))
-                    .orElse("DEFAULT");
-            }
-        } catch (Exception e) {
-            System.err.println("Error getting rank for " + player.getUsername() + ": " + e.getMessage());
-        }
-        
-        // Default fallback
-        return "DEFAULT";
+        // Chat is now handled by ChatHandler using Radium
+        // This method delegates to the new ChatHandler
+        mythic.hub.handlers.ChatHandler.onPlayerChat(event);
     }
     
     /**
@@ -202,18 +126,15 @@ public class ChatManager {
                 return true; // Hardcoded operator
             }
             
-            // Check if player has staff rank or permission
-            String playerRank = getPlayerHighestRank(player);
-            RankConfig.RankInfo rankInfo = RankConfig.getRankInfo(playerRank);
-            
-            // Staff ranks (priority 600+)
-            if (rankInfo.getPriority() >= 600) {
-                return true;
+            // Check for staff permission using Radium
+            try {
+                return mythic.hub.MythicHubServer.getInstance().getRadiumClient()
+                        .hasPermission(player.getUuid(), "mythic.staff")
+                        .get();
+            } catch (Exception e) {
+                System.err.println("Error checking staff permission via Radium: " + e.getMessage());
+                return false;
             }
-            
-            // Check for staff permission
-            PlayerProfile profile = getPlayerProfile(player);
-            return profile != null && profile.hasPermission("mythic.staff");
             
         } catch (Exception e) {
             System.err.println("Error checking staff status for " + player.getUsername() + ": " + e.getMessage());
@@ -225,7 +146,7 @@ public class ChatManager {
      * Broadcasts a message to all online players
      * @param message The message to broadcast
      */
-    private void broadcastToAll(Component message) {
+    public void broadcastToAll(Component message) {
         for (Player player : getAllOnlinePlayers()) {
             player.sendMessage(message);
         }

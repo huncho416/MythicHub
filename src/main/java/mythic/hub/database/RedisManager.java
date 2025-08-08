@@ -5,14 +5,13 @@ import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
 import mythic.hub.config.DatabaseConfig;
-import mythic.hub.data.Permission;
 import mythic.hub.data.PlayerProfile;
-import mythic.hub.data.Rank;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
 
 public class RedisManager {
@@ -43,23 +42,22 @@ public class RedisManager {
 
                 PlayerProfile profile = new PlayerProfile(uuid, username);
 
-                // Load permissions
-                List<String> permissionStrings = syncCommands.lrange(playerKey + ":permissions", 0, -1);
-                for (String permStr : permissionStrings) {
-                    Permission permission = Permission.fromString(permStr);
-                    profile.addPermission(permission);
-                }
+                // Load friends data
+                List<String> friendStrings = syncCommands.lrange(playerKey + ":friends", 0, -1);
+                List<UUID> friends = friendStrings.stream()
+                        .map(UUID::fromString)
+                        .collect(Collectors.toList());
+                profile.setFriends(friends);
 
-                // Load ranks
-                List<String> rankStrings = syncCommands.lrange(playerKey + ":ranks", 0, -1);
-                for (String rankStr : rankStrings) {
-                    Rank rank = Rank.fromString(rankStr);
-                    profile.addRank(rank);
-                }
+                List<String> requestStrings = syncCommands.lrange(playerKey + ":friend_requests", 0, -1);
+                List<UUID> friendRequests = requestStrings.stream()
+                        .map(UUID::fromString)
+                        .collect(Collectors.toList());
+                profile.setFriendRequests(friendRequests);
 
                 // Load additional data
                 for (Map.Entry<String, String> entry : playerData.entrySet()) {
-                    if (!entry.getKey().startsWith("permissions") && !entry.getKey().startsWith("ranks")) {
+                    if (!entry.getKey().startsWith("friends") && !entry.getKey().startsWith("friend_requests")) {
                         profile.getAdditionalData().put(entry.getKey(), entry.getValue());
                     }
                 }
@@ -146,5 +144,16 @@ public class RedisManager {
 
     public void expire(String key, long seconds) {
         syncCommands.expire(key, seconds);
+    }
+
+    // Pub/Sub methods for proxy communication
+    public void publish(String channel, String message) {
+        syncCommands.publish(channel, message);
+    }
+    
+    // Get keys matching a pattern
+    public Set<String> getKeys(String pattern) {
+        List<String> keysList = syncCommands.keys(pattern);
+        return Set.copyOf(keysList);
     }
 }

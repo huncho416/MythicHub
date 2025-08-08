@@ -243,9 +243,30 @@ public class ItemHandler {
                 ))
                 .build();
 
-        String rankName = (profile != null && profile.getHighestRank() != null)
-                ? profile.getHighestRank().getName()
-                : "Member";
+        String rankName = "Member"; // Default rank
+        try {
+            // Get rank from Radium
+            mythic.hub.integrations.radium.RadiumProfile radiumProfile = 
+                mythic.hub.MythicHubServer.getInstance().getRadiumClient()
+                    .getPlayerProfile(player.getUuid()).get();
+            
+            if (radiumProfile != null && !radiumProfile.getRanks().isEmpty()) {
+                // Get the highest priority rank
+                mythic.hub.integrations.radium.RadiumClient radiumClient = 
+                    mythic.hub.MythicHubServer.getInstance().getRadiumClient();
+                
+                rankName = radiumProfile.getRanks().stream()
+                    .map(rName -> {
+                        mythic.hub.integrations.radium.RadiumRank rank = radiumClient.getRank(rName);
+                        return new Object[] { rName, rank != null ? rank.getWeight() : 0 };
+                    })
+                    .max((r1, r2) -> Integer.compare((Integer) r1[1], (Integer) r2[1]))
+                    .map(r -> (String) r[0])
+                    .orElse("Member");
+            }
+        } catch (Exception e) {
+            System.err.println("Error getting rank from Radium for profile GUI: " + e.getMessage());
+        }
 
         ItemStack rankInfo = ItemStack.builder(Material.GOLDEN_APPLE)
                 .customName(Component.text("Rank: " + rankName).color(LIGHT_PINK).decoration(TextDecoration.ITALIC, false))

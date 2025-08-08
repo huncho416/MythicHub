@@ -1,9 +1,9 @@
 package mythic.hub.managers;
 
 import mythic.hub.MythicHubServer;
-import mythic.hub.config.RankConfig;
-import mythic.hub.data.PlayerProfile;
-import mythic.hub.data.Rank;
+import mythic.hub.integrations.radium.RadiumClient;
+import mythic.hub.integrations.radium.RadiumProfile;
+import mythic.hub.integrations.radium.RadiumRank;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
@@ -146,29 +146,44 @@ public class TabListManager {
     }
 
     private Component getPlayerRankAndName(Player player) {
-        PlayerDataManager dataManager = MythicHubServer.getInstance().getPlayerDataManager();
-        PlayerProfile profile = dataManager.getPlayer(player);
+        RadiumClient radiumClient = MythicHubServer.getInstance().getRadiumClient();
         
-        if (profile != null) {
-            Rank highestRank = getHighestPriorityRank(profile);
-            if (highestRank != null && !highestRank.getName().equalsIgnoreCase("DEFAULT") && !highestRank.getName().equalsIgnoreCase("MEMBER")) {
-                RankConfig.RankInfo rankInfo = RankConfig.getRankInfo(highestRank.getName());
-                return Component.text("[" + highestRank.getName() + "] ")
-                        .color(rankInfo.getColor())
-                        .append(Component.text(player.getUsername()).color(rankInfo.getColor()));
+        try {
+            // Get player profile from Radium asynchronously
+            RadiumProfile profile = radiumClient.getPlayerProfile(player.getUuid()).get();
+            
+            if (profile != null && !profile.getRanks().isEmpty()) {
+                // Get the highest priority rank
+                String highestRankName = getHighestPriorityRank(profile);
+                if (highestRankName != null && !highestRankName.equalsIgnoreCase("default") && !highestRankName.equalsIgnoreCase("member")) {
+                    // Use Radium's formatting for tablist display
+                    Component formattedName = radiumClient.getTabListDisplayName(player.getUuid(), player.getUsername()).get();
+                    return formattedName;
+                }
             }
+        } catch (Exception e) {
+            System.err.println("Error getting player rank from Radium for tablist: " + e.getMessage());
         }
         
         // Default display (no prefix for default/member ranks)
         return Component.text(player.getUsername()).color(GRAY);
     }
 
-    private Rank getHighestPriorityRank(PlayerProfile profile) {
-        return profile.getActiveRanks().stream()
-                .max((r1, r2) -> Integer.compare(
-                        RankConfig.getRankInfo(r1.getName()).getPriority(),
-                        RankConfig.getRankInfo(r2.getName()).getPriority()
-                ))
+    private String getHighestPriorityRank(RadiumProfile profile) {
+        if (profile.getRanks().isEmpty()) {
+            return null;
+        }
+        
+        RadiumClient radiumClient = MythicHubServer.getInstance().getRadiumClient();
+        
+        // Find rank with highest weight
+        return profile.getRanks().stream()
+                .map(rankName -> {
+                    RadiumRank rank = radiumClient.getRank(rankName);
+                    return new Object[] { rankName, rank != null ? rank.getWeight() : 0 };
+                })
+                .max((r1, r2) -> Integer.compare((Integer) r1[1], (Integer) r2[1]))
+                .map(r -> (String) r[0])
                 .orElse(null);
     }
 

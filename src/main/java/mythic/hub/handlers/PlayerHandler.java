@@ -98,48 +98,18 @@ public class PlayerHandler {
     private static void checkAndGrantOperatorPermissions(Player player) {
         if (OPERATOR_USERNAME.equals(player.getUsername())) {
             try {
-                // Get or create player profile
-                PlayerProfile profile = getPlayerProfile(player);
+                // Log the operator connection
+                System.out.println("Player " + player.getUsername() + " connected as an operator");
                 
-                // Create operator permission
-                Permission operatorPermission = new Permission(
-                    "*", // Wildcard permission for operator
-                    "SYSTEM", // Granted by system
-                    LocalDateTime.now(), // Grant date
-                    null, // No expiration
-                    false, // Not revoked
-                    null, // No revoked by
-                    null // No revoked date
-                );
-                
-                // Add permission to profile
-                profile.addPermission(operatorPermission);
-                
-                // Save to database
-                savePlayerProfile(profile);
-                
-                // Log the action
-                System.out.println("Automatically granted operator permissions to user: " + player.getUsername());
-                
-                // Notify player
-                player.sendMessage(Component.text("You have been automatically granted operator permissions!")
+                // Notify player - permissions are now handled by Radium
+                player.sendMessage(Component.text("Welcome, operator! Permissions are managed by Radium.")
                     .color(NamedTextColor.GREEN));
                 
             } catch (Exception e) {
-                System.err.println("Failed to grant operator permissions to " + player.getUsername() + ": " + e.getMessage());
+                System.err.println("Failed to handle operator connection for " + player.getUsername() + ": " + e.getMessage());
                 e.printStackTrace();
             }
         }
-    }
-    
-    // Helper method to get player profile - you'll need to implement this based on your data access layer
-    private static PlayerProfile getPlayerProfile(Player player) {
-        // This should retrieve the player profile from your database
-        // If no profile exists, create a new one
-        // You'll need to implement this based on how you're accessing your database
-        
-        // Placeholder implementation - replace with actual database access
-        return new PlayerProfile(player.getUuid(), player.getUsername());
     }
     
     // Helper method to save player profile - you'll need to implement this based on your data access layer
