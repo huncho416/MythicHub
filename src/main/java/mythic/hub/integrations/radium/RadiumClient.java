@@ -199,6 +199,48 @@ public class RadiumClient {
     }
     
     /**
+     * Forward a command to Radium proxy for execution
+     */
+    public CompletableFuture<Boolean> forwardCommandToProxy(String playerName, String command) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String requestId = UUID.randomUUID().toString();
+                
+                JsonObject request = new JsonObject();
+                request.addProperty("player", playerName);
+                request.addProperty("command", command);
+                request.addProperty("requestId", requestId);
+                
+                // Publish to Redis channel
+                redisManager.publish("radium:command:execute", request.toString());
+                
+                System.out.println("Forwarded command to Radium: /" + command + " for player: " + playerName);
+                return true;
+                
+            } catch (Exception e) {
+                System.err.println("Error forwarding command to Radium: " + e.getMessage());
+                return false;
+            }
+        });
+    }
+    
+    /**
+     * Check if a command should be forwarded to Radium proxy
+     */
+    public static boolean shouldForwardCommand(String command) {
+        String cmd = command.toLowerCase();
+        return cmd.startsWith("/rank") || 
+               cmd.startsWith("/grant") || 
+               cmd.startsWith("/permission") || 
+               cmd.startsWith("/perm") ||
+               cmd.startsWith("/vanish") ||
+               cmd.startsWith("/staffchat") ||
+               cmd.startsWith("/gmc") ||
+               cmd.startsWith("/gms") ||
+               cmd.startsWith("/gamemode");
+    }
+
+    /**
      * Load ranks from Redis on startup
      */
     private void loadRanksFromRedis() {

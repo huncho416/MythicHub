@@ -82,6 +82,10 @@ public class MythicHubServer {
         // Register commands
         MinecraftServer.getCommandManager().register(new FriendsCommand());
         MinecraftServer.getCommandManager().register(new ServerCommand());
+        MinecraftServer.getCommandManager().register(new mythic.hub.commands.RadiumTestCommand());
+        
+        // Register staff command forwarders for Radium integration
+        registerStaffCommands();
 
         // Add shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -151,6 +155,23 @@ public class MythicHubServer {
         commandManager.register(new TagCommand());
         
         System.out.println("Commands registered successfully!");
+    }
+
+    // Register staff command forwarders for Radium integration
+    private static void registerStaffCommands() {
+        var commandManager = MinecraftServer.getCommandManager();
+        
+        // Register staff command forwarders that will forward commands to Radium proxy
+        commandManager.register(new mythic.hub.commands.StaffCommandForwarder("rank"));
+        commandManager.register(new mythic.hub.commands.StaffCommandForwarder("grant"));
+        commandManager.register(new mythic.hub.commands.StaffCommandForwarder("permission", "perm"));
+        commandManager.register(new mythic.hub.commands.StaffCommandForwarder("vanish", "v"));
+        commandManager.register(new mythic.hub.commands.StaffCommandForwarder("staffchat", "sc"));
+        commandManager.register(new mythic.hub.commands.StaffCommandForwarder("gmc"));
+        commandManager.register(new mythic.hub.commands.StaffCommandForwarder("gms"));
+        commandManager.register(new mythic.hub.commands.StaffCommandForwarder("gamemode", "gm"));
+        
+        System.out.println("Staff command forwarders registered for Radium integration!");
     }
 
     // Getter methods for managers
