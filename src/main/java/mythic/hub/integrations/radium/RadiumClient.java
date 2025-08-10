@@ -150,19 +150,36 @@ public class RadiumClient {
      */
     public CompletableFuture<Component> formatChatMessage(UUID playerUuid, String playerName, String message) {
         return getPlayerHighestRank(playerUuid).thenApply(rank -> {
-            String prefix = rank.getPrefix();
-            String chatColor = rank.getColor();
-            
-            // Use Radium's exact chat format pattern: {prefix}{chatColor}{player}&f: {message}
-            // This matches the format used in Radium's ChatManager
-            Component prefixComponent = legacySerializer.deserialize(prefix);
-            Component nameComponent = legacySerializer.deserialize(chatColor + playerName);
-            Component messageComponent = legacySerializer.deserialize("&f: " + message);
-            
-            return Component.empty()
-                    .append(prefixComponent)
-                    .append(nameComponent)
-                    .append(messageComponent);
+            try {
+                String prefix = rank.getPrefix();
+                String chatColor = rank.getColor();
+                
+                System.out.println("[RadiumClient] Formatting chat for " + playerName + " with rank " + rank.getName() + 
+                                   " (prefix: '" + prefix + "', color: '" + chatColor + "')");
+                
+                // Use Radium's exact chat format pattern: {prefix}{chatColor}{player}&f: {message}
+                // This matches the format used in Radium's ChatManager
+                Component prefixComponent = legacySerializer.deserialize(prefix);
+                Component nameComponent = legacySerializer.deserialize(chatColor + playerName);
+                Component messageComponent = legacySerializer.deserialize("&f: " + message);
+                
+                Component finalMessage = Component.empty()
+                        .append(prefixComponent)
+                        .append(nameComponent)
+                        .append(messageComponent);
+                
+                System.out.println("[RadiumClient] Successfully formatted chat message for " + playerName);
+                return finalMessage;
+                
+            } catch (Exception e) {
+                System.err.println("[RadiumClient] Error formatting chat message for " + playerName + ": " + e.getMessage());
+                // Return fallback formatting
+                return Component.text("[Member] " + playerName + ": " + message);
+            }
+        }).exceptionally(throwable -> {
+            System.err.println("[RadiumClient] Failed to get rank for " + playerName + ": " + throwable.getMessage());
+            // Return fallback formatting
+            return Component.text("[Member] " + playerName + ": " + message);
         });
     }
     
@@ -579,6 +596,7 @@ public class RadiumClient {
         }
         
         try {
+            // Subscribe to profile updates
             redisManager.subscribe("radium:profile:updated", (channel, message) -> {
                 if ("radium:profile:updated".equals(channel)) {
                     String playerUuid = message;
@@ -587,10 +605,21 @@ public class RadiumClient {
                 }
             });
             
+            // Subscribe to rank updates
+            redisManager.subscribe("radium:rank:updated", (channel, message) -> {
+                if ("radium:rank:updated".equals(channel)) {
+                    String rankName = message;
+                    System.out.println("[RadiumClient] Received rank update notification for: " + rankName);
+                    clearRankCache(rankName);
+                    clearAllPlayerCacheForRankUpdate();
+                }
+            });
+            
             subscriptionInitialized = true;
-            System.out.println("[RadiumClient] Profile update listener initialized");
+            System.out.println("[RadiumClient] Profile and rank update listeners initialized successfully");
         } catch (Exception e) {
-            System.err.println("[RadiumClient] Error initializing profile update subscription: " + e.getMessage());
+            System.err.println("[RadiumClient] Error initializing update subscriptions: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
@@ -605,6 +634,8 @@ public class RadiumClient {
             
             if (removed != null) {
                 System.out.println("[RadiumClient] Cleared cache for player UUID: " + playerUuid);
+            } else {
+                System.out.println("[RadiumClient] No cached profile found for UUID: " + playerUuid);
             }
         } catch (Exception e) {
             System.err.println("[RadiumClient] Error clearing cache for UUID " + playerUuid + ": " + e.getMessage());
@@ -612,16 +643,33 @@ public class RadiumClient {
     }
 
     /**
-     * Clear cached profile by username
+     * Clear cached rank by name
      */
-    public void clearPlayerCache(String username) {
-        // Find profile by username and remove it
-        profileCache.entrySet().removeIf(entry -> {
-            // We need to check if we can get the username from the profile
-            // Since RadiumProfile doesn't have a getUsername method, we'll remove by UUID lookup
-            return false; // Will implement once we have username lookup
-        });
-        System.out.println("[RadiumClient] Cache clear requested for player: " + username);
+    public void clearRankCache(String rankName) {
+        try {
+            RadiumRank removed = rankCache.remove(rankName.toLowerCase());
+            rankCacheTime.remove(rankName.toLowerCase());
+            
+            if (removed != null) {
+                System.out.println("[RadiumClient] Cleared rank cache for: " + rankName);
+            }
+        } catch (Exception e) {
+            System.err.println("[RadiumClient] Error clearing rank cache for " + rankName + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Clear all player profiles when a rank is updated (since player display might change)
+     */
+    public void clearAllPlayerCacheForRankUpdate() {
+        try {
+            int profileCount = profileCache.size();
+            profileCache.clear();
+            profileCacheTime.clear();
+            System.out.println("[RadiumClient] Cleared " + profileCount + " player profiles due to rank update");
+        } catch (Exception e) {
+            System.err.println("[RadiumClient] Error clearing all player cache: " + e.getMessage());
+        }
     }
 
     /**
@@ -635,6 +683,30 @@ public class RadiumClient {
         System.out.println("[RadiumClient] Cleared all profile and rank cache");
     }
 
+    /**
+     * Clear cached profile by username (for debugging)
+     */
+    public void clearPlayerCache(String username) {
+        // Find profile by username and remove it
+        profileCache.entrySet().removeIf(entry -> {
+            // Since we don't have direct username access in RadiumProfile,
+            // we'll remove all cache and let it refresh
+            return true;
+        });
+        profileCacheTime.clear();
+        System.out.println("[RadiumClient] Cache clear requested for player: " + username + " (cleared all cache)");
+    }
+
+    /**
+     * Debug method to check current cache status
+     */
+    public void debugCacheStatus() {
+        System.out.println("[RadiumClient] Cache Status:");
+        System.out.println("  - Profiles cached: " + profileCache.size());
+        System.out.println("  - Ranks cached: " + rankCache.size());
+        System.out.println("  - Subscription initialized: " + subscriptionInitialized);
+    }
+    
     /**
      * Force refresh a player's profile from Redis
      */
@@ -654,6 +726,7 @@ public class RadiumClient {
         try {
             if (subscriptionInitialized) {
                 redisManager.unsubscribe("radium:profile:updated");
+                redisManager.unsubscribe("radium:rank:updated");
             }
             clearAllCache();
             System.out.println("[RadiumClient] Shutdown completed");
