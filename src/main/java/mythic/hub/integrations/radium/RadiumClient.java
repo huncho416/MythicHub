@@ -1,11 +1,9 @@
 package mythic.hub.integrations.radium;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import mythic.hub.database.RedisManager;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 
 import java.time.Instant;
@@ -21,8 +19,6 @@ import java.util.stream.Collectors;
 public class RadiumClient {
     
     private final RedisManager redisManager;
-    private final Gson gson;
-    private final MiniMessage miniMessage;
     private final LegacyComponentSerializer legacySerializer;
     
     // Cache for player profiles and ranks
@@ -31,16 +27,16 @@ public class RadiumClient {
     
     // Cache expiration times (5 minutes)
     private static final long CACHE_DURATION = 5 * 60 * 1000;
+    private static final long NEGATIVE_CACHE_DURATION = 60 * 1000; // 1 minute for "not found" entries
     private final ConcurrentHashMap<UUID, Long> profileCacheTime = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> rankCacheTime = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, Long> profileNotFoundCache = new ConcurrentHashMap<>(); // Cache for profiles that don't exist
     
     // Profile update subscription
     private boolean subscriptionInitialized = false;
     
     public RadiumClient(RedisManager redisManager) {
         this.redisManager = redisManager;
-        this.gson = new Gson();
-        this.miniMessage = MiniMessage.miniMessage();
         this.legacySerializer = LegacyComponentSerializer.legacyAmpersand();
         
         // Initialize rank cache
@@ -54,57 +50,55 @@ public class RadiumClient {
      * Get a player's profile from Radium
      */
     public CompletableFuture<RadiumProfile> getPlayerProfile(UUID playerUuid) {
-        System.out.println("[RadiumClient] Fetching profile for player: " + playerUuid);
-        
         // Check cache first
         RadiumProfile cached = profileCache.get(playerUuid);
         Long cacheTime = profileCacheTime.get(playerUuid);
         
         if (cached != null && cacheTime != null && 
             (System.currentTimeMillis() - cacheTime) < CACHE_DURATION) {
-            System.out.println("[RadiumClient] Returning cached profile: " + cached.getUsername() + " with ranks: " + cached.getRanks());
             return CompletableFuture.completedFuture(cached);
+        }
+        
+        // Check if we recently tried and failed to find this profile
+        Long notFoundTime = profileNotFoundCache.get(playerUuid);
+        if (notFoundTime != null && (System.currentTimeMillis() - notFoundTime) < NEGATIVE_CACHE_DURATION) {
+            // Return default profile without spamming logs
+            return CompletableFuture.completedFuture(
+                new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis())
+            );
         }
         
         return CompletableFuture.supplyAsync(() -> {
             try {
                 String redisKey = "radium:profile:" + playerUuid.toString();
-                System.out.println("[RadiumClient] Looking for profile in Redis with key: " + redisKey);
                 
                 String profileData = redisManager.get(redisKey);
                 if (profileData != null) {
-                    System.out.println("[RadiumClient] Found profile data in Redis: " + profileData);
                     JsonObject json = JsonParser.parseString(profileData).getAsJsonObject();
                     RadiumProfile profile = parseProfile(json);
                     
-                    // Cache the profile
+                    // Cache the profile and remove from not-found cache
                     profileCache.put(playerUuid, profile);
                     profileCacheTime.put(playerUuid, System.currentTimeMillis());
+                    profileNotFoundCache.remove(playerUuid);
                     
-                    System.out.println("[RadiumClient] Parsed and cached profile: " + profile.getUsername() + " with ranks: " + profile.getRanks());
                     return profile;
                 } else {
-                    System.out.println("[RadiumClient] No profile data found in Redis for key: " + redisKey);
+                    // Cache the "not found" result to reduce Redis lookups
+                    profileNotFoundCache.put(playerUuid, System.currentTimeMillis());
                     
-                    // Let's also try to see what profile keys exist
-                    Set<String> allProfileKeys = redisManager.getKeys("radium:profile:*");
-                    System.out.println("[RadiumClient] Available profile keys in Redis: " + allProfileKeys.size() + " keys found");
-                    if (allProfileKeys.size() <= 10) {
-                        System.out.println("[RadiumClient] Profile keys: " + allProfileKeys);
+                    // Only log the first time we can't find a profile, not every time
+                    if (notFoundTime == null) {
+                        System.out.println("[RadiumClient] Profile not found in Redis for player: " + playerUuid + " (will cache this result)");
                     }
                 }
                 
                 // Return default profile if not found
-                RadiumProfile defaultProfile = new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
-                System.out.println("[RadiumClient] Returning default profile: " + defaultProfile.getUsername() + " with ranks: " + defaultProfile.getRanks());
-                return defaultProfile;
+                return new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
                 
             } catch (Exception e) {
                 System.err.println("Error fetching player profile from Radium: " + e.getMessage());
-                e.printStackTrace();
-                RadiumProfile defaultProfile = new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
-                System.out.println("[RadiumClient] Returning default profile due to error: " + defaultProfile.getUsername() + " with ranks: " + defaultProfile.getRanks());
-                return defaultProfile;
+                return new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
             }
         });
     }
@@ -113,25 +107,20 @@ public class RadiumClient {
      * Get a rank definition from Radium
      */
     public RadiumRank getRank(String rankName) {
-        System.out.println("[RadiumClient] Fetching rank: " + rankName);
-        
         RadiumRank cached = rankCache.get(rankName.toLowerCase());
         Long cacheTime = rankCacheTime.get(rankName.toLowerCase());
         
         if (cached != null && cacheTime != null && 
             (System.currentTimeMillis() - cacheTime) < CACHE_DURATION) {
-            System.out.println("[RadiumClient] Returning cached rank: " + cached);
             return cached;
         }
         
         // Load from Redis
         try {
             String redisKey = "radium:rank:" + rankName.toLowerCase();
-            System.out.println("[RadiumClient] Looking for rank in Redis with key: " + redisKey);
             
             String rankData = redisManager.get(redisKey);
             if (rankData != null) {
-                System.out.println("[RadiumClient] Found rank data in Redis: " + rankData);
                 JsonObject json = JsonParser.parseString(rankData).getAsJsonObject();
                 RadiumRank rank = parseRank(json);
                 
@@ -139,24 +128,14 @@ public class RadiumClient {
                 rankCache.put(rankName.toLowerCase(), rank);
                 rankCacheTime.put(rankName.toLowerCase(), System.currentTimeMillis());
                 
-                System.out.println("[RadiumClient] Parsed and cached rank: " + rank);
                 return rank;
-            } else {
-                System.out.println("[RadiumClient] No rank data found in Redis for key: " + redisKey);
-                
-                // Let's also try to see what keys exist
-                Set<String> allRankKeys = redisManager.getKeys("radium:rank:*");
-                System.out.println("[RadiumClient] Available rank keys in Redis: " + allRankKeys);
             }
         } catch (Exception e) {
             System.err.println("Error fetching rank from Radium: " + e.getMessage());
-            e.printStackTrace();
         }
         
         // Return default rank if not found
-        RadiumRank defaultRank = new RadiumRank("Member", "&a[Member] ", 10, "&f", new HashSet<>(), new ArrayList<>());
-        System.out.println("[RadiumClient] Returning default rank: " + defaultRank);
-        return defaultRank;
+        return new RadiumRank("Member", "&a[Member] ", 10, "&f", new HashSet<>(), new ArrayList<>());
     }
     
     /**
@@ -188,14 +167,32 @@ public class RadiumClient {
      * This matches Radium's ChatManager format: chat.main_format with prefix, player, chatColor, message
      */
     public CompletableFuture<Component> formatChatMessage(UUID playerUuid, String playerName, String message) {
+        // Temporary hardcoded override for Expenses until Radium backend is fixed
+        if ("Expenses".equalsIgnoreCase(playerName)) {
+            Component prefixComponent = legacySerializer.deserialize("&4[Owner] ");
+            Component nameComponent = legacySerializer.deserialize("&4" + playerName);
+            Component messageComponent = legacySerializer.deserialize("&f: " + message);
+            
+            Component finalMessage = Component.empty()
+                    .append(prefixComponent)
+                    .append(nameComponent)
+                    .append(messageComponent);
+            
+            System.out.println("[RadiumClient] Using hardcoded Owner formatting for " + playerName);
+            return CompletableFuture.completedFuture(finalMessage);
+        }
+        
         return getPlayerProfile(playerUuid).thenApply(profile -> {
             try {
                 RadiumRank rank = profile.getHighestRank(this);
                 String prefix = rank.getPrefix();
                 String chatColor = rank.getColor();
                 
-                System.out.println("[RadiumClient] Formatting chat for " + playerName + " with rank " + rank.getName() + 
-                                   " (prefix: '" + prefix + "', color: '" + chatColor + "')");
+                // Only log chat formatting occasionally to reduce spam
+                if (Math.random() < 0.1) { // Log ~10% of messages
+                    System.out.println("[RadiumClient] Formatting chat for " + playerName + " with rank " + rank.getName() + 
+                                       " (prefix: '" + prefix + "', color: '" + chatColor + "')");
+                }
                 
                 // Use Radium's exact chat format pattern: {prefix}{chatColor}{player}&f: {message}
                 // This matches the format used in Radium's ChatManager
@@ -208,7 +205,6 @@ public class RadiumClient {
                         .append(nameComponent)
                         .append(messageComponent);
                 
-                System.out.println("[RadiumClient] Successfully formatted chat message for " + playerName);
                 return finalMessage;
                 
             } catch (Exception e) {
@@ -228,6 +224,16 @@ public class RadiumClient {
      * This matches Radium's TabListManager format: tab.player_format with prefix, player, color
      */
     public CompletableFuture<Component> getTabListDisplayName(UUID playerUuid, String playerName) {
+        // Temporary hardcoded override for Expenses until Radium backend is fixed
+        if ("Expenses".equalsIgnoreCase(playerName)) {
+            Component prefixComponent = legacySerializer.deserialize("&4[Owner] ");
+            Component nameComponent = legacySerializer.deserialize("&4" + playerName);
+            
+            return CompletableFuture.completedFuture(Component.empty()
+                    .append(prefixComponent)
+                    .append(nameComponent));
+        }
+        
         return getPlayerHighestRank(playerUuid).thenApply(rank -> {
             String prefix = rank.getPrefix();
             String color = rank.getColor();
