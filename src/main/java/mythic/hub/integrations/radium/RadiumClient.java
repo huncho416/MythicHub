@@ -8,9 +8,11 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 /**
  * Integration client for communicating with Radium backend system
@@ -138,17 +140,18 @@ public class RadiumClient {
     
     /**
      * Format a chat message using Radium's chat formatting
+     * This matches Radium's ChatManager format: chat.main_format with prefix, player, chatColor, message
      */
     public CompletableFuture<Component> formatChatMessage(UUID playerUuid, String playerName, String message) {
         return getPlayerHighestRank(playerUuid).thenApply(rank -> {
             String prefix = rank.getPrefix();
-            String nameColor = rank.getColor();
+            String chatColor = rank.getColor();
             
-            // Create the formatted message using Radium's format
-            // Format: [Prefix] PlayerName: Message
+            // Use Radium's exact chat format pattern: {prefix}{chatColor}{player}&f: {message}
+            // This matches the format used in Radium's ChatManager
             Component prefixComponent = legacySerializer.deserialize(prefix);
-            Component nameComponent = legacySerializer.deserialize(nameColor + playerName);
-            Component messageComponent = Component.text(": " + message);
+            Component nameComponent = legacySerializer.deserialize(chatColor + playerName);
+            Component messageComponent = legacySerializer.deserialize("&f: " + message);
             
             return Component.empty()
                     .append(prefixComponent)
@@ -158,16 +161,17 @@ public class RadiumClient {
     }
     
     /**
-     * Get tab list display name for a player
+     * Get tab list display name for a player using Radium's format
+     * This matches Radium's TabListManager format: tab.player_format with prefix, player, color
      */
     public CompletableFuture<Component> getTabListDisplayName(UUID playerUuid, String playerName) {
         return getPlayerHighestRank(playerUuid).thenApply(rank -> {
             String prefix = rank.getPrefix();
-            String nameColor = rank.getColor();
+            String color = rank.getColor();
             
-            // Format: [Prefix] PlayerName
+            // Use Radium's tab list format: {prefix}{color}{player}
             Component prefixComponent = legacySerializer.deserialize(prefix);
-            Component nameComponent = legacySerializer.deserialize(nameColor + playerName);
+            Component nameComponent = legacySerializer.deserialize(color + playerName);
             
             return Component.empty()
                     .append(prefixComponent)
@@ -180,22 +184,85 @@ public class RadiumClient {
      */
     public CompletableFuture<Boolean> hasPermission(UUID playerUuid, String permission) {
         return getPlayerProfile(playerUuid).thenApply(profile -> {
+            // Hardcoded check for owner "Expenses" - always has all permissions
+            if (profile != null && "Expenses".equalsIgnoreCase(getPlayerNameFromProfile(profile))) {
+                return true;
+            }
+            
             // Check direct permissions
-            if (profile.getPermissions().containsKey(permission) && 
+            if (profile != null && profile.getPermissions().containsKey(permission) && 
                 profile.getPermissions().get(permission)) {
                 return true;
             }
             
             // Check rank permissions
-            for (String rankName : profile.getRanks()) {
-                RadiumRank rank = getRank(rankName);
-                if (rank != null && rank.hasPermission(permission)) {
-                    return true;
+            if (profile != null) {
+                for (String rankName : profile.getRanks()) {
+                    RadiumRank rank = getRank(rankName);
+                    if (rank != null && rank.hasPermission(permission)) {
+                        return true;
+                    }
                 }
             }
             
             return false;
         });
+    }
+    
+    /**
+     * Check if a player has a specific permission by username (more reliable for hardcoded users)
+     */
+    public CompletableFuture<Boolean> hasPermission(String playerName, String permission) {
+        // Hardcoded check for owner "Expenses" - always has all permissions
+        if ("Expenses".equalsIgnoreCase(playerName)) {
+            return CompletableFuture.completedFuture(true);
+        }
+        
+        // For other players, try to get their UUID and use the UUID-based method
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                // Search for player by username in Redis
+                Set<String> profileKeys = redisManager.getKeys("radium:profile:*");
+                for (String key : profileKeys) {
+                    String profileJson = redisManager.get(key);
+                    if (profileJson != null) {
+                        JsonObject profile = JsonParser.parseString(profileJson).getAsJsonObject();
+                        if (profile.has("username") && 
+                            playerName.equalsIgnoreCase(profile.get("username").getAsString())) {
+                            // Found the player, extract UUID and use UUID-based method
+                            String uuidStr = profile.get("uuid").getAsString();
+                            UUID playerUuid = UUID.fromString(uuidStr);
+                            return hasPermission(playerUuid, permission).join();
+                        }
+                    }
+                }
+                return false; // Player not found
+            } catch (Exception e) {
+                System.err.println("Error checking permission by username: " + e.getMessage());
+                return false;
+            }
+        });
+    }
+    
+    /**
+     * Helper method to get player name from profile
+     */
+    private String getPlayerNameFromProfile(RadiumProfile profile) {
+        try {
+            // Try to get username from the profile's UUID by looking up in Redis
+            String key = "radium:profile:" + profile.getUuid().toString();
+            String profileJson = redisManager.get(key);
+            if (profileJson != null) {
+                JsonObject json = JsonParser.parseString(profileJson).getAsJsonObject();
+                if (json.has("username")) {
+                    return json.get("username").getAsString();
+                }
+            }
+            return null;
+        } catch (Exception e) {
+            System.err.println("Error getting player name from profile: " + e.getMessage());
+            return null;
+        }
     }
     
     /**
@@ -329,5 +396,171 @@ public class RadiumClient {
         rankCache.clear();
         rankCacheTime.clear();
         loadRanksFromRedis();
+    }
+    
+    // Friend System Methods
+    
+    /**
+     * Gets a player's friends list from Radium
+     * @param playerUuid The player's UUID
+     * @return Set of friend UUIDs, empty set if none or on error
+     */
+    public CompletableFuture<Set<UUID>> getFriends(UUID playerUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String key = "radium:profile:" + playerUuid.toString();
+                String profileJson = redisManager.get(key);
+                if (profileJson != null) {
+                    JsonObject profile = JsonParser.parseString(profileJson).getAsJsonObject();
+                    if (profile.has("friends")) {
+                        return profile.getAsJsonArray("friends").asList().stream()
+                            .map(element -> UUID.fromString(element.getAsString()))
+                            .collect(Collectors.toSet());
+                    }
+                }
+                return Collections.emptySet();
+            } catch (Exception e) {
+                System.err.println("Failed to get friends for " + playerUuid + ": " + e.getMessage());
+                return Collections.emptySet();
+            }
+        });
+    }
+    
+    /**
+     * Gets a player's incoming friend requests from Radium
+     * @param playerUuid The player's UUID
+     * @return Set of incoming request UUIDs, empty set if none or on error
+     */
+    public CompletableFuture<Set<UUID>> getIncomingFriendRequests(UUID playerUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String key = "radium:profile:" + playerUuid.toString();
+                String profileJson = redisManager.get(key);
+                if (profileJson != null) {
+                    JsonObject profile = JsonParser.parseString(profileJson).getAsJsonObject();
+                    if (profile.has("incomingRequests")) {
+                        return profile.getAsJsonArray("incomingRequests").asList().stream()
+                            .map(element -> UUID.fromString(element.getAsString()))
+                            .collect(Collectors.toSet());
+                    }
+                }
+                return Collections.emptySet();
+            } catch (Exception e) {
+                System.err.println("Failed to get incoming requests for " + playerUuid + ": " + e.getMessage());
+                return Collections.emptySet();
+            }
+        });
+    }
+    
+    /**
+     * Gets a player's outgoing friend requests from Radium
+     * @param playerUuid The player's UUID
+     * @return Set of outgoing request UUIDs, empty set if none or on error
+     */
+    public CompletableFuture<Set<UUID>> getOutgoingFriendRequests(UUID playerUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String key = "radium:profile:" + playerUuid.toString();
+                String profileJson = redisManager.get(key);
+                if (profileJson != null) {
+                    JsonObject profile = JsonParser.parseString(profileJson).getAsJsonObject();
+                    if (profile.has("outgoingRequests")) {
+                        return profile.getAsJsonArray("outgoingRequests").asList().stream()
+                            .map(element -> UUID.fromString(element.getAsString()))
+                            .collect(Collectors.toSet());
+                    }
+                }
+                return Collections.emptySet();
+            } catch (Exception e) {
+                System.err.println("Failed to get outgoing requests for " + playerUuid + ": " + e.getMessage());
+                return Collections.emptySet();
+            }
+        });
+    }
+    
+    /**
+     * Checks if two players are friends in Radium
+     * @param playerUuid The first player's UUID
+     * @param friendUuid The second player's UUID
+     * @return true if they are friends, false otherwise
+     */
+    public CompletableFuture<Boolean> areFriends(UUID playerUuid, UUID friendUuid) {
+        return getFriends(playerUuid).thenApply(friends -> friends.contains(friendUuid));
+    }
+    
+    /**
+     * Gets a friend's last seen timestamp from Radium
+     * @param playerUuid The player's UUID
+     * @param friendUuid The friend's UUID
+     * @return Last seen timestamp, or null if not available
+     */
+    public CompletableFuture<Instant> getFriendLastSeen(UUID playerUuid, UUID friendUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String key = "friend_lastseen:" + playerUuid.toString() + ":" + friendUuid.toString();
+                String timestamp = redisManager.get(key);
+                if (timestamp != null) {
+                    return Instant.ofEpochMilli(Long.parseLong(timestamp));
+                }
+                return null;
+            } catch (Exception e) {
+                System.err.println("Failed to get friend last seen: " + e.getMessage());
+                return null;
+            }
+        });
+    }
+    
+    /**
+     * Sends a friend request through Radium's command system
+     * @param playerName The sender's name
+     * @param targetName The target player's name
+     */
+    public CompletableFuture<Boolean> sendFriendRequest(String playerName, String targetName) {
+        String command = "friend add " + targetName;
+        return forwardCommandToProxy(playerName, command);
+    }
+    
+    /**
+     * Removes a friend through Radium's command system
+     * @param playerName The sender's name
+     * @param targetName The target player's name
+     */
+    public CompletableFuture<Boolean> removeFriend(String playerName, String targetName) {
+        String command = "friend remove " + targetName;
+        return forwardCommandToProxy(playerName, command);
+    }
+    
+    /**
+     * Denies a friend request through Radium's command system
+     * @param playerName The sender's name
+     * @param targetName The target player's name
+     */
+    public CompletableFuture<Boolean> denyFriendRequest(String playerName, String targetName) {
+        String command = "friend deny " + targetName;
+        return forwardCommandToProxy(playerName, command);
+    }
+    
+    /**
+     * Gets the profile name for a given UUID from Radium
+     * @param playerUuid The player's UUID
+     * @return The player's username, or null if not found
+     */
+    public CompletableFuture<String> getPlayerName(UUID playerUuid) {
+        return CompletableFuture.supplyAsync(() -> {
+            try {
+                String key = "radium:profile:" + playerUuid.toString();
+                String profileJson = redisManager.get(key);
+                if (profileJson != null) {
+                    JsonObject profile = JsonParser.parseString(profileJson).getAsJsonObject();
+                    if (profile.has("username")) {
+                        return profile.get("username").getAsString();
+                    }
+                }
+                return null;
+            } catch (Exception e) {
+                System.err.println("Failed to get player name for " + playerUuid + ": " + e.getMessage());
+                return null;
+            }
+        });
     }
 }

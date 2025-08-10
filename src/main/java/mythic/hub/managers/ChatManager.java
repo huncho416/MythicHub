@@ -122,12 +122,21 @@ public class ChatManager {
     private boolean isPlayerStaff(Player player) {
         try {
             // Check if player has staff permission or is the hardcoded operator
-            if ("Expenses".equals(player.getUsername())) {
-                return true; // Hardcoded operator
+            if ("Expenses".equalsIgnoreCase(player.getUsername())) {
+                return true; // Hardcoded operator - always has permissions
             }
             
-            // Check for staff permission using Radium
+            // Check for staff permission using Radium (try username first, then UUID)
             try {
+                // Try username-based check first (more reliable for hardcoded users)
+                Boolean usernameResult = mythic.hub.MythicHubServer.getInstance().getRadiumClient()
+                        .hasPermission(player.getUsername(), "mythic.staff")
+                        .get();
+                if (usernameResult != null && usernameResult) {
+                    return true;
+                }
+                
+                // Fallback to UUID-based check
                 return mythic.hub.MythicHubServer.getInstance().getRadiumClient()
                         .hasPermission(player.getUuid(), "mythic.staff")
                         .get();

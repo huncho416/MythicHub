@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
 
 public class RedisManager {
@@ -42,22 +41,9 @@ public class RedisManager {
 
                 PlayerProfile profile = new PlayerProfile(uuid, username);
 
-                // Load friends data
-                List<String> friendStrings = syncCommands.lrange(playerKey + ":friends", 0, -1);
-                List<UUID> friends = friendStrings.stream()
-                        .map(UUID::fromString)
-                        .collect(Collectors.toList());
-                profile.setFriends(friends);
-
-                List<String> requestStrings = syncCommands.lrange(playerKey + ":friend_requests", 0, -1);
-                List<UUID> friendRequests = requestStrings.stream()
-                        .map(UUID::fromString)
-                        .collect(Collectors.toList());
-                profile.setFriendRequests(friendRequests);
-
                 // Load additional data
                 for (Map.Entry<String, String> entry : playerData.entrySet()) {
-                    if (!entry.getKey().startsWith("friends") && !entry.getKey().startsWith("friend_requests")) {
+                    if (!entry.getKey().equals("username") && !entry.getKey().equals("lastSeen")) {
                         profile.getAdditionalData().put(entry.getKey(), entry.getValue());
                     }
                 }

@@ -1,7 +1,7 @@
 package mythic.hub.handlers;
 
 import mythic.hub.MythicHubServer;
-import mythic.hub.data.PlayerProfile;
+import mythic.hub.integrations.radium.RadiumClient;
 import net.kyori.adventure.sound.Sound;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -14,8 +14,10 @@ import net.minestom.server.inventory.InventoryType;
 import net.minestom.server.item.ItemStack;
 import net.minestom.server.item.Material;
 import net.minestom.server.sound.SoundEvent;
+import net.minestom.server.MinecraftServer;
 
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class ItemHandler {
@@ -232,9 +234,6 @@ public class ItemHandler {
                         .color(LIGHT_PINK)
                         .decoration(TextDecoration.BOLD, true));
 
-        // Get player data
-        PlayerProfile profile = MythicHubServer.getInstance().getPlayerDataManager().getPlayer(player);
-
         ItemStack playerInfo = ItemStack.builder(Material.PLAYER_HEAD)
                 .customName(Component.text(player.getUsername()).color(WHITE).decoration(TextDecoration.ITALIC, false))
                 .lore(List.of(
@@ -332,40 +331,146 @@ public class ItemHandler {
     }
 // Add this to your onPlayerUseItem method in the switch statement or if-else chain
 // Add this method to handle friends functionality
-private static void handleFriends(Player player) {
+public static void handleFriends(Player player) {
     player.playSound(CLICK_SOUND);
     
     Inventory friendsInventory = new Inventory(InventoryType.CHEST_6_ROW, Component.text("Friends")
             .color(LIGHT_PINK)
             .decoration(TextDecoration.ITALIC, false));
 
-    // You'll need to implement FriendManager or use your existing friend system
-    // Example structure for the friends GUI:
+    // Get RadiumClient instance
+    RadiumClient radiumClient = MythicHubServer.getInstance().getRadiumClient();
     
-    // Friends list section
-    // TODO: Integrate with your FriendManager to get actual friends
-    // List<Friend> friends = FriendManager.getFriends(player.getUuid());
-    
-    // Friend requests section
-    // TODO: Integrate with your FriendManager to get pending requests
-    // List<FriendRequest> requests = FriendManager.getPendingRequests(player.getUuid());
+    // Load friends and requests asynchronously
+    radiumClient.getFriends(player.getUuid()).thenAccept(friends -> {
+        radiumClient.getIncomingFriendRequests(player.getUuid()).thenAccept(incomingRequests -> {
+            radiumClient.getOutgoingFriendRequests(player.getUuid()).thenAccept(outgoingRequests -> {
+                
+                // Display friends (first 27 slots for friends)
+                List<UUID> friendsList = friends.stream().toList();
+                for (int i = 0; i < Math.min(friendsList.size(), 27); i++) {
+                    final int friendSlot = i;
+                    UUID friendUuid = friendsList.get(i);
+                    
+                    radiumClient.getPlayerName(friendUuid).thenAccept(friendName -> {
+                        if (friendName != null) {
+                            // Check if friend is online
+                            Player onlineFriend = getPlayerByUuid(friendUuid);
+                            
+                            ItemStack friendItem;
+                            if (onlineFriend != null) {
+                                // Online friend (green wool)
+                                friendItem = ItemStack.builder(Material.GREEN_WOOL)
+                                    .customName(Component.text(friendName)
+                                        .color(GREEN)
+                                        .decoration(TextDecoration.ITALIC, false))
+                                    .lore(List.of(
+                                        Component.text("● Online")
+                                            .color(GREEN)
+                                            .decoration(TextDecoration.ITALIC, false),
+                                        Component.text("Right-click to remove")
+                                            .color(GRAY)
+                                            .decoration(TextDecoration.ITALIC, false)
+                                    ))
+                                    .build();
+                            } else {
+                                // Offline friend (gray wool)
+                                friendItem = ItemStack.builder(Material.GRAY_WOOL)
+                                    .customName(Component.text(friendName)
+                                        .color(WHITE)
+                                        .decoration(TextDecoration.ITALIC, false))
+                                    .lore(List.of(
+                                        Component.text("● Offline")
+                                            .color(GRAY)
+                                            .decoration(TextDecoration.ITALIC, false),
+                                        Component.text("Right-click to remove")
+                                            .color(GRAY)
+                                            .decoration(TextDecoration.ITALIC, false)
+                                    ))
+                                    .build();
+                            }
+                            
+                            friendsInventory.setItemStack(friendSlot, friendItem);
+                        }
+                    });
+                }
+                
+                // Display incoming requests (slots 27-35)
+                List<UUID> incomingList = incomingRequests.stream().toList();
+                for (int i = 0; i < Math.min(incomingList.size(), 9); i++) {
+                    final int requestSlot = 27 + i;
+                    UUID requesterUuid = incomingList.get(i);
+                    
+                    radiumClient.getPlayerName(requesterUuid).thenAccept(requesterName -> {
+                        if (requesterName != null) {
+                            ItemStack requestItem = ItemStack.builder(Material.YELLOW_WOOL)
+                                .customName(Component.text("Request from " + requesterName)
+                                    .color(NamedTextColor.YELLOW)
+                                    .decoration(TextDecoration.ITALIC, false))
+                                .lore(List.of(
+                                    Component.text("Left-click to accept")
+                                        .color(GREEN)
+                                        .decoration(TextDecoration.ITALIC, false),
+                                    Component.text("Right-click to deny")
+                                        .color(RED)
+                                        .decoration(TextDecoration.ITALIC, false)
+                                ))
+                                .build();
+                            
+                            friendsInventory.setItemStack(requestSlot, requestItem);
+                        }
+                    });
+                }
+                
+                // Display outgoing requests (slots 36-44)
+                List<UUID> outgoingList = outgoingRequests.stream().toList();
+                for (int i = 0; i < Math.min(outgoingList.size(), 9); i++) {
+                    final int outgoingSlot = 36 + i;
+                    UUID targetUuid = outgoingList.get(i);
+                    
+                    radiumClient.getPlayerName(targetUuid).thenAccept(targetName -> {
+                        if (targetName != null) {
+                            ItemStack outgoingItem = ItemStack.builder(Material.ORANGE_WOOL)
+                                .customName(Component.text("Sent to " + targetName)
+                                    .color(NamedTextColor.GOLD)
+                                    .decoration(TextDecoration.ITALIC, false))
+                                .lore(List.of(
+                                    Component.text("Waiting for response...")
+                                        .color(GRAY)
+                                        .decoration(TextDecoration.ITALIC, false),
+                                    Component.text("Right-click to cancel")
+                                        .color(RED)
+                                        .decoration(TextDecoration.ITALIC, false)
+                                ))
+                                .build();
+                            
+                            friendsInventory.setItemStack(outgoingSlot, outgoingItem);
+                        }
+                    });
+                }
+            });
+        });
+    });
     
     // Add friend button
     ItemStack addFriend = ItemStack.builder(Material.GREEN_WOOL)
             .customName(Component.text("Add Friend")
                     .color(GREEN)
                     .decoration(TextDecoration.ITALIC, false))
-            .lore(List.of(Component.text("Click to add a new friend")
+            .lore(List.of(Component.text("Click to send a friend request")
+                    .color(GRAY)
+                    .decoration(TextDecoration.ITALIC, false),
+                    Component.text("Use: /friend add <username>")
                     .color(GRAY)
                     .decoration(TextDecoration.ITALIC, false)))
             .build();
     
-    // Settings button
-    ItemStack friendSettings = ItemStack.builder(Material.GRAY_WOOL)
-            .customName(Component.text("Friend Settings")
-                    .color(WHITE)
+    // View requests button
+    ItemStack viewRequests = ItemStack.builder(Material.YELLOW_WOOL)
+            .customName(Component.text("View All Requests")
+                    .color(NamedTextColor.YELLOW)
                     .decoration(TextDecoration.ITALIC, false))
-            .lore(List.of(Component.text("Manage friend preferences")
+            .lore(List.of(Component.text("Use: /friend requests")
                     .color(GRAY)
                     .decoration(TextDecoration.ITALIC, false)))
             .build();
@@ -375,11 +480,21 @@ private static void handleFriends(Player player) {
             .customName(CLOSE_TEXT)
             .build();
     
-    // Set items in inventory
+    // Set control items in inventory
     friendsInventory.setItemStack(45, addFriend);
-    friendsInventory.setItemStack(49, friendSettings);
+    friendsInventory.setItemStack(49, viewRequests);
     friendsInventory.setItemStack(53, close);
     
     player.openInventory(friendsInventory);
+}
+
+// Helper method to find a player by UUID
+private static Player getPlayerByUuid(UUID uuid) {
+    for (Player onlinePlayer : MinecraftServer.getConnectionManager().getOnlinePlayers()) {
+        if (onlinePlayer.getUuid().equals(uuid)) {
+            return onlinePlayer;
+        }
+    }
+    return null;
 }
 }

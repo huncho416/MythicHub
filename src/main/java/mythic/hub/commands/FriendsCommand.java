@@ -1,9 +1,10 @@
 package mythic.hub.commands;
 
 import mythic.hub.MythicHubServer;
-import mythic.hub.managers.PlayerDataManager;
-import mythic.hub.data.PlayerProfile;
+import mythic.hub.integrations.radium.RadiumClient;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.event.ClickEvent;
+import net.kyori.adventure.text.event.HoverEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -15,8 +16,11 @@ import net.minestom.server.command.CommandSender;
 import net.minestom.server.entity.Player;
 import net.minestom.server.MinecraftServer;
 
-import java.util.List;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public class FriendsCommand extends Command {
     private static final TextColor LIGHT_PINK = TextColor.color(255, 182, 193);
@@ -25,8 +29,11 @@ public class FriendsCommand extends Command {
     private static final TextColor GRAY = NamedTextColor.GRAY;
     private static final TextColor YELLOW = NamedTextColor.YELLOW;
 
+    private final RadiumClient radiumClient;
+
     public FriendsCommand() {
         super("friend", "friends");
+        this.radiumClient = MythicHubServer.getInstance().getRadiumClient();
 
         setDefaultExecutor(this::handleFriendsHelp);
 
@@ -35,7 +42,30 @@ public class FriendsCommand extends Command {
             setDefaultExecutor(FriendsCommand.this::handleFriendsList);
         }});
 
-        // /friend <username>
+        // /friend requests
+        addSubcommand(new Command("requests") {{
+            setDefaultExecutor(FriendsCommand.this::handleFriendRequests);
+        }});
+
+        // /friend add <username>
+        ArgumentWord addUsernameArgument = ArgumentType.Word("username");
+        addSubcommand(new Command("add") {{
+            addSyntax(FriendsCommand.this::handleFriendAdd, addUsernameArgument);
+        }});
+
+        // /friend remove <username>
+        ArgumentWord removeUsernameArgument = ArgumentType.Word("username");
+        addSubcommand(new Command("remove") {{
+            addSyntax(FriendsCommand.this::handleFriendRemove, removeUsernameArgument);
+        }});
+
+        // /friend deny <username>
+        ArgumentWord denyUsernameArgument = ArgumentType.Word("username");
+        addSubcommand(new Command("deny") {{
+            addSyntax(FriendsCommand.this::handleFriendDeny, denyUsernameArgument);
+        }});
+
+        // /friend <username> (shortcut for add)
         ArgumentWord usernameArgument = ArgumentType.Word("username");
         addSyntax(this::handleFriendAdd, usernameArgument);
     }
@@ -46,68 +76,165 @@ public class FriendsCommand extends Command {
             return;
         }
 
-        PlayerDataManager dataManager = MythicHubServer.getInstance().getPlayerDataManager();
-        PlayerProfile profile = dataManager.getPlayer(player);
+        player.sendMessage(Component.text("Loading your friends list...").color(YELLOW));
 
-        if (profile == null) {
-            player.sendMessage(Component.text("Could not load your profile. Please try again.")
-                    .color(RED));
-            return;
-        }
-
-        // Get friends list from profile
-        List<UUID> friends = profile.getFriends();
-        
-        if (friends.isEmpty()) {
-            player.sendMessage(Component.text("You don't have any friends yet!")
-                    .color(YELLOW));
-            player.sendMessage(Component.text("Use ")
-                    .color(GRAY)
-                    .append(Component.text("/friend <username>")
-                            .color(LIGHT_PINK))
-                    .append(Component.text(" to add a friend!")
-                            .color(GRAY)));
-            return;
-        }
-
-        player.sendMessage(Component.text("═══════════════════")
-                .color(LIGHT_PINK));
-        player.sendMessage(Component.text("Your Friends (" + friends.size() + ")")
-                .color(LIGHT_PINK)
-                .decoration(TextDecoration.BOLD, true));
-        player.sendMessage(Component.text("═══════════════════")
-                .color(LIGHT_PINK));
-
-        // Display each friend with online status
-        for (UUID friendUuid : friends) {
-            // Try to get friend's current name and online status
-            Player onlineFriend = getPlayerByUuid(friendUuid);
-            
-            if (onlineFriend != null) {
-                // Friend is online
-                player.sendMessage(Component.text("● ")
-                        .color(GREEN)
-                        .append(Component.text(onlineFriend.getUsername())
-                                .color(NamedTextColor.WHITE))
-                        .append(Component.text(" (Online)")
-                                .color(GREEN)));
-            } else {
-                // Friend is offline - get their stored username
-                dataManager.loadPlayer(friendUuid, "Unknown").thenAccept(friendProfile -> {
-                    if (friendProfile != null) {
-                        player.sendMessage(Component.text("● ")
-                                .color(GRAY)
-                                .append(Component.text(friendProfile.getUsername())
-                                        .color(NamedTextColor.WHITE))
-                                .append(Component.text(" (Offline)")
-                                        .color(GRAY)));
-                    }
-                });
+        radiumClient.getFriends(player.getUuid()).thenAccept(friends -> {
+            if (friends.isEmpty()) {
+                player.sendMessage(Component.text("You don't have any friends yet!")
+                        .color(YELLOW));
+                player.sendMessage(Component.text("Use ")
+                        .color(GRAY)
+                        .append(Component.text("/friend add <username>")
+                                .color(LIGHT_PINK))
+                        .append(Component.text(" to add a friend!")
+                                .color(GRAY)));
+                return;
             }
+
+            player.sendMessage(Component.text("═══════════════════")
+                    .color(LIGHT_PINK));
+            player.sendMessage(Component.text("Your Friends (" + friends.size() + ")")
+                    .color(LIGHT_PINK)
+                    .decoration(TextDecoration.BOLD, true));
+            player.sendMessage(Component.text("═══════════════════")
+                    .color(LIGHT_PINK));
+
+            // Display each friend with online status
+            for (UUID friendUuid : friends) {
+                // Try to get friend's current name and online status
+                Player onlineFriend = getPlayerByUuid(friendUuid);
+                
+                if (onlineFriend != null) {
+                    // Friend is online
+                    player.sendMessage(Component.text("● ")
+                            .color(GREEN)
+                            .append(Component.text(onlineFriend.getUsername())
+                                    .color(NamedTextColor.WHITE))
+                            .append(Component.text(" (Online)")
+                                    .color(GREEN)));
+                } else {
+                    // Friend is offline - get their stored username and last seen
+                    radiumClient.getPlayerName(friendUuid).thenAccept(friendName -> {
+                        if (friendName != null) {
+                            radiumClient.getFriendLastSeen(player.getUuid(), friendUuid).thenAccept(lastSeen -> {
+                                String lastSeenText = "";
+                                if (lastSeen != null) {
+                                    lastSeenText = " (Last seen: " + formatTimeSince(lastSeen) + ")";
+                                } else {
+                                    lastSeenText = " (Offline)";
+                                }
+                                
+                                player.sendMessage(Component.text("● ")
+                                        .color(GRAY)
+                                        .append(Component.text(friendName)
+                                                .color(NamedTextColor.WHITE))
+                                        .append(Component.text(lastSeenText)
+                                                .color(GRAY)));
+                            });
+                        }
+                    });
+                }
+            }
+            
+            player.sendMessage(Component.text("═══════════════════")
+                    .color(LIGHT_PINK));
+        }).exceptionally(throwable -> {
+            player.sendMessage(Component.text("Failed to load friends list. Please try again.")
+                    .color(RED));
+            return null;
+        });
+    }
+
+    private void handleFriendRequests(CommandSender sender, CommandContext context) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Component.text("Only players can use this command!").color(RED));
+            return;
         }
-        
-        player.sendMessage(Component.text("═══════════════════")
-                .color(LIGHT_PINK));
+
+        player.sendMessage(Component.text("Loading your friend requests...").color(YELLOW));
+
+        CompletableFuture<Set<UUID>> incomingFuture = radiumClient.getIncomingFriendRequests(player.getUuid());
+        CompletableFuture<Set<UUID>> outgoingFuture = radiumClient.getOutgoingFriendRequests(player.getUuid());
+
+        CompletableFuture.allOf(incomingFuture, outgoingFuture).thenRun(() -> {
+            Set<UUID> incomingRequests = incomingFuture.join();
+            Set<UUID> outgoingRequests = outgoingFuture.join();
+
+            player.sendMessage(Component.text("═══════════════════")
+                    .color(LIGHT_PINK));
+            player.sendMessage(Component.text("Friend Requests")
+                    .color(LIGHT_PINK)
+                    .decoration(TextDecoration.BOLD, true));
+            player.sendMessage(Component.text("═══════════════════")
+                    .color(LIGHT_PINK));
+
+            if (incomingRequests.isEmpty() && outgoingRequests.isEmpty()) {
+                player.sendMessage(Component.text("You have no pending friend requests.")
+                        .color(YELLOW));
+            } else {
+                if (!incomingRequests.isEmpty()) {
+                    player.sendMessage(Component.text("Incoming Requests:")
+                            .color(GREEN)
+                            .decoration(TextDecoration.BOLD, true));
+                    
+                    for (UUID requesterUuid : incomingRequests) {
+                        radiumClient.getPlayerName(requesterUuid).thenAccept(requesterName -> {
+                            if (requesterName != null) {
+                                Component acceptButton = Component.text("[Accept]")
+                                        .color(GREEN)
+                                        .clickEvent(ClickEvent.runCommand("/friend add " + requesterName))
+                                        .hoverEvent(HoverEvent.showText(Component.text("Click to accept")));
+                                
+                                Component denyButton = Component.text("[Deny]")
+                                        .color(RED)
+                                        .clickEvent(ClickEvent.runCommand("/friend deny " + requesterName))
+                                        .hoverEvent(HoverEvent.showText(Component.text("Click to deny")));
+
+                                player.sendMessage(Component.text("• ")
+                                        .color(YELLOW)
+                                        .append(Component.text(requesterName)
+                                                .color(NamedTextColor.WHITE))
+                                        .append(Component.text(" "))
+                                        .append(acceptButton)
+                                        .append(Component.text(" "))
+                                        .append(denyButton));
+                            }
+                        });
+                    }
+                }
+
+                if (!outgoingRequests.isEmpty()) {
+                    player.sendMessage(Component.text("Outgoing Requests:")
+                            .color(YELLOW)
+                            .decoration(TextDecoration.BOLD, true));
+                    
+                    for (UUID targetUuid : outgoingRequests) {
+                        radiumClient.getPlayerName(targetUuid).thenAccept(targetName -> {
+                            if (targetName != null) {
+                                Component cancelButton = Component.text("[Cancel]")
+                                        .color(RED)
+                                        .clickEvent(ClickEvent.runCommand("/friend remove " + targetName))
+                                        .hoverEvent(HoverEvent.showText(Component.text("Click to cancel")));
+
+                                player.sendMessage(Component.text("• ")
+                                        .color(GRAY)
+                                        .append(Component.text(targetName)
+                                                .color(NamedTextColor.WHITE))
+                                        .append(Component.text(" "))
+                                        .append(cancelButton));
+                            }
+                        });
+                    }
+                }
+            }
+            
+            player.sendMessage(Component.text("═══════════════════")
+                    .color(LIGHT_PINK));
+        }).exceptionally(throwable -> {
+            player.sendMessage(Component.text("Failed to load friend requests. Please try again.")
+                    .color(RED));
+            return null;
+        });
     }
 
     private void handleFriendAdd(CommandSender sender, CommandContext context) {
@@ -124,111 +251,86 @@ public class FriendsCommand extends Command {
             return;
         }
 
-        PlayerDataManager dataManager = MythicHubServer.getInstance().getPlayerDataManager();
-        PlayerProfile senderProfile = dataManager.getPlayer(player);
+        player.sendMessage(Component.text("Sending friend request to " + targetUsername + "...")
+                .color(YELLOW));
 
-        if (senderProfile == null) {
-            player.sendMessage(Component.text("Could not load your profile. Please try again.")
+        radiumClient.sendFriendRequest(player.getUsername(), targetUsername).thenAccept(success -> {
+            if (success) {
+                player.sendMessage(Component.text("Friend request sent to ")
+                        .color(GREEN)
+                        .append(Component.text(targetUsername)
+                                .color(LIGHT_PINK))
+                        .append(Component.text("!")
+                                .color(GREEN)));
+            } else {
+                player.sendMessage(Component.text("Failed to send friend request. Please check the username and try again.")
+                        .color(RED));
+            }
+        }).exceptionally(throwable -> {
+            player.sendMessage(Component.text("An error occurred while sending the friend request.")
                     .color(RED));
-            return;
-        }
-
-        // Check if player is online
-        Player targetPlayer = getPlayerByUsername(targetUsername);
-        
-        if (targetPlayer != null) {
-            // Player is online
-            handleOnlineFriendAdd(player, targetPlayer, senderProfile, dataManager);
-        } else {
-            // Player is offline - try to load their profile
-            player.sendMessage(Component.text("Looking up player...")
-                    .color(YELLOW));
-            
-            // This is a simplified approach - you might want to implement a UUID lookup service
-            player.sendMessage(Component.text("Player '" + targetUsername + "' is not online. They must be online to receive friend requests.")
-                    .color(RED));
-        }
+            return null;
+        });
     }
 
-    private void handleOnlineFriendAdd(Player sender, Player target, PlayerProfile senderProfile, PlayerDataManager dataManager) {
-        PlayerProfile targetProfile = dataManager.getPlayer(target);
-        
-        if (targetProfile == null) {
-            sender.sendMessage(Component.text("Could not load target player's profile.")
+    private void handleFriendRemove(CommandSender sender, CommandContext context) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Component.text("Only players can use this command!").color(RED));
+            return;
+        }
+
+        String targetUsername = context.get("username");
+
+        player.sendMessage(Component.text("Removing friend " + targetUsername + "...")
+                .color(YELLOW));
+
+        radiumClient.removeFriend(player.getUsername(), targetUsername).thenAccept(success -> {
+            if (success) {
+                player.sendMessage(Component.text("Successfully removed ")
+                        .color(GREEN)
+                        .append(Component.text(targetUsername)
+                                .color(LIGHT_PINK))
+                        .append(Component.text(" from your friends list.")
+                                .color(GREEN)));
+            } else {
+                player.sendMessage(Component.text("Failed to remove friend. Please check the username and try again.")
+                        .color(RED));
+            }
+        }).exceptionally(throwable -> {
+            player.sendMessage(Component.text("An error occurred while removing the friend.")
                     .color(RED));
+            return null;
+        });
+    }
+
+    private void handleFriendDeny(CommandSender sender, CommandContext context) {
+        if (!(sender instanceof Player player)) {
+            sender.sendMessage(Component.text("Only players can use this command!").color(RED));
             return;
         }
 
-        // Check if already friends
-        if (senderProfile.getFriends().contains(target.getUuid())) {
-            sender.sendMessage(Component.text("You are already friends with " + target.getUsername() + "!")
-                    .color(YELLOW));
-            return;
-        }
+        String targetUsername = context.get("username");
 
-        // Check if already sent a request
-        if (targetProfile.hasPendingFriendRequest(sender.getUuid())) {
-            sender.sendMessage(Component.text("You have already sent a friend request to " + target.getUsername() + "!")
-                    .color(YELLOW));
-            return;
-        }
+        player.sendMessage(Component.text("Denying friend request from " + targetUsername + "...")
+                .color(YELLOW));
 
-        // Check if target has sent a request to sender (mutual request)
-        if (senderProfile.hasPendingFriendRequest(target.getUuid())) {
-            // Accept the mutual request
-            senderProfile.addFriend(target.getUuid());
-            targetProfile.addFriend(sender.getUuid());
-            senderProfile.removeFriendRequest(target.getUuid());
-            
-            // Save profiles
-            dataManager.getRedisManager().savePlayerProfile(senderProfile);
-            dataManager.getRedisManager().savePlayerProfile(targetProfile);
-            
-            // Notify both players
-            sender.sendMessage(Component.text("You are now friends with ")
-                    .color(GREEN)
-                    .append(Component.text(target.getUsername())
-                            .color(LIGHT_PINK))
-                    .append(Component.text("!")
-                            .color(GREEN)));
-            
-            target.sendMessage(Component.text("You are now friends with ")
-                    .color(GREEN)
-                    .append(Component.text(sender.getUsername())
-                            .color(LIGHT_PINK))
-                    .append(Component.text("!")
-                            .color(GREEN)));
-            return;
-        }
-
-        // Send friend request
-        targetProfile.addFriendRequest(sender.getUuid());
-        dataManager.getRedisManager().savePlayerProfile(targetProfile);
-
-        // Notify sender
-        sender.sendMessage(Component.text("Friend request sent to ")
-                .color(GREEN)
-                .append(Component.text(target.getUsername())
-                        .color(LIGHT_PINK))
-                .append(Component.text("!")
-                        .color(GREEN)));
-
-        // Notify target
-        target.sendMessage(Component.text("═══════════════════")
-                .color(LIGHT_PINK));
-        target.sendMessage(Component.text("Friend Request")
-                .color(LIGHT_PINK)
-                .decoration(TextDecoration.BOLD, true));
-        target.sendMessage(Component.text(sender.getUsername() + " wants to be your friend!")
-                .color(NamedTextColor.WHITE));
-        target.sendMessage(Component.text("Use ")
-                .color(GRAY)
-                .append(Component.text("/friend " + sender.getUsername())
-                        .color(LIGHT_PINK))
-                .append(Component.text(" to accept!")
-                        .color(GRAY)));
-        target.sendMessage(Component.text("═══════════════════")
-                .color(LIGHT_PINK));
+        radiumClient.denyFriendRequest(player.getUsername(), targetUsername).thenAccept(success -> {
+            if (success) {
+                player.sendMessage(Component.text("Successfully denied friend request from ")
+                        .color(GREEN)
+                        .append(Component.text(targetUsername)
+                                .color(LIGHT_PINK))
+                        .append(Component.text(".")
+                                .color(GREEN)));
+            } else {
+                player.sendMessage(Component.text("Failed to deny friend request. Please check the username and try again.")
+                        .color(RED));
+            }
+        }).exceptionally(throwable -> {
+            player.sendMessage(Component.text("An error occurred while denying the friend request.")
+                    .color(RED));
+            return null;
+        });
     }
 
     private void handleFriendsHelp(CommandSender sender, CommandContext context) {
@@ -239,13 +341,25 @@ public class FriendsCommand extends Command {
                 .decoration(TextDecoration.BOLD, true));
         sender.sendMessage(Component.text("═══════════════════")
                 .color(LIGHT_PINK));
-        sender.sendMessage(Component.text("/friend <username>")
+        sender.sendMessage(Component.text("/friend add <username>")
                 .color(LIGHT_PINK)
                 .append(Component.text(" - Send a friend request")
+                        .color(GRAY)));
+        sender.sendMessage(Component.text("/friend remove <username>")
+                .color(LIGHT_PINK)
+                .append(Component.text(" - Remove a friend")
+                        .color(GRAY)));
+        sender.sendMessage(Component.text("/friend deny <username>")
+                .color(LIGHT_PINK)
+                .append(Component.text(" - Deny a friend request")
                         .color(GRAY)));
         sender.sendMessage(Component.text("/friend list")
                 .color(LIGHT_PINK)
                 .append(Component.text(" - View your friends list")
+                        .color(GRAY)));
+        sender.sendMessage(Component.text("/friend requests")
+                .color(LIGHT_PINK)
+                .append(Component.text(" - View pending requests")
                         .color(GRAY)));
         sender.sendMessage(Component.text("═══════════════════")
                 .color(LIGHT_PINK));
@@ -261,13 +375,22 @@ public class FriendsCommand extends Command {
         return null;
     }
 
-    // Helper method to find a player by username
-    private Player getPlayerByUsername(String username) {
-        for (Player onlinePlayer : MinecraftServer.getConnectionManager().getOnlinePlayers()) {
-            if (onlinePlayer.getUsername().equalsIgnoreCase(username)) {
-                return onlinePlayer;
-            }
+    // Helper method to format time since last seen
+    private String formatTimeSince(Instant lastSeen) {
+        Duration duration = Duration.between(lastSeen, Instant.now());
+        
+        long days = duration.toDays();
+        long hours = duration.toHours() % 24;
+        long minutes = duration.toMinutes() % 60;
+        
+        if (days > 0) {
+            return days + "d " + hours + "h ago";
+        } else if (hours > 0) {
+            return hours + "h " + minutes + "m ago";
+        } else if (minutes > 0) {
+            return minutes + "m ago";
+        } else {
+            return "Just now";
         }
-        return null;
     }
 }

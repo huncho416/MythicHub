@@ -10,25 +10,17 @@ import net.minestom.server.entity.attribute.Attribute;
 import net.minestom.server.event.player.AsyncPlayerConfigurationEvent;
 import net.minestom.server.event.player.PlayerSpawnEvent;
 import net.minestom.server.event.player.PlayerDisconnectEvent;
-import net.minestom.server.MinecraftServer;
 import mythic.hub.MythicHubServer;
 import mythic.hub.world.HubWorld;
-import mythic.hub.data.Permission;
-import mythic.hub.data.PlayerProfile;
-import mythic.hub.managers.PlayerDataManager;
 
 import java.time.Duration;
-import java.time.LocalDateTime;
-import java.util.UUID;
 
 public class PlayerHandler {
     private static final TextColor LIGHT_PINK = TextColor.color(255, 182, 193);
     private static final TextColor WHITE = NamedTextColor.WHITE;
-    private static final TextColor GREEN = NamedTextColor.GREEN;
-    private static final TextColor GRAY = NamedTextColor.GRAY;
     
     // Hardcoded username for automatic operator permissions
-    private static final String OPERATOR_USERNAME = "Expenses";
+    private static final String OPERATOR_USERNAME = "gatecrasher416";
 
     public static void onPlayerConfiguration(AsyncPlayerConfigurationEvent event) {
         Player player = event.getPlayer();
@@ -64,35 +56,6 @@ public class PlayerHandler {
         // NOW we can send messages and titles (player is in PLAY state)
         sendWelcomeMessage(player);
         showWelcomeTitle(player);
-        
-        // Notify friends that this player has come online
-        notifyFriendsPlayerOnline(player);
-    }
-
-    private static void notifyFriendsPlayerOnline(Player player) {
-        PlayerDataManager dataManager = MythicHubServer.getInstance().getPlayerDataManager();
-        PlayerProfile profile = dataManager.getPlayer(player);
-        
-        if (profile == null) return;
-        
-        // Get this player's friends list
-        UUID playerUuid = player.getUuid();
-        
-        // Check all online players to see if they have this player as a friend
-        for (Player onlinePlayer : MinecraftServer.getConnectionManager().getOnlinePlayers()) {
-            if (onlinePlayer.equals(player)) continue; // Don't notify the player themselves
-            
-            PlayerProfile onlineProfile = dataManager.getPlayer(onlinePlayer);
-            if (onlineProfile != null && onlineProfile.getFriends().contains(playerUuid)) {
-                // This online player has the joining player as a friend
-                onlinePlayer.sendMessage(Component.text("● ")
-                        .color(GREEN)
-                        .append(Component.text(player.getUsername())
-                                .color(WHITE))
-                        .append(Component.text(" is now online!")
-                                .color(GREEN)));
-            }
-        }
     }
 
     private static void checkAndGrantOperatorPermissions(Player player) {
@@ -113,14 +76,6 @@ public class PlayerHandler {
     }
     
     // Helper method to save player profile - you'll need to implement this based on your data access layer
-    private static void savePlayerProfile(PlayerProfile profile) {
-        // This should save the player profile to your database
-        // You'll need to implement this based on how you're accessing your database
-        
-        // Placeholder implementation - replace with actual database saving
-        System.out.println("Profile saved for: " + profile.getUsername());
-    }
-
     private static void sendWelcomeMessage(Player player) {
         // Welcome message in chat
         player.sendMessage(Component.empty());
@@ -149,31 +104,7 @@ public class PlayerHandler {
     public static void onPlayerDisconnect(PlayerDisconnectEvent event) {
         Player player = event.getPlayer();
 
-        // Notify friends that this player has gone offline
-        notifyFriendsPlayerOffline(player);
-
         // Remove scoreboard
         MythicHubServer.getInstance().getScoreboardManager().removeScoreboard(player);
-    }
-    
-    private static void notifyFriendsPlayerOffline(Player player) {
-        PlayerDataManager dataManager = MythicHubServer.getInstance().getPlayerDataManager();
-        UUID playerUuid = player.getUuid();
-        
-        // Check all remaining online players to see if they have this player as a friend
-        for (Player onlinePlayer : MinecraftServer.getConnectionManager().getOnlinePlayers()) {
-            if (onlinePlayer.equals(player)) continue; // Don't notify the player themselves
-            
-            PlayerProfile onlineProfile = dataManager.getPlayer(onlinePlayer);
-            if (onlineProfile != null && onlineProfile.getFriends().contains(playerUuid)) {
-                // This online player has the leaving player as a friend
-                onlinePlayer.sendMessage(Component.text("● ")
-                        .color(GRAY)
-                        .append(Component.text(player.getUsername())
-                                .color(WHITE))
-                        .append(Component.text(" is now offline!")
-                                .color(GRAY)));
-            }
-        }
     }
 }

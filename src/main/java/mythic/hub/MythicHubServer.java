@@ -416,6 +416,9 @@ public class MythicHubServer {
                     // Handle menu item clicks
                     if (itemName.equals("Close")) {
                         player.closeInventory();
+                    } else if (itemName.equals("Friend Requests")) {
+                        player.closeInventory();
+                        ItemHandler.handleFriends(player);
                     } else if (itemName.equals("KitPvP") || itemName.equals("Survival") || itemName.equals("Creative")) {
                         player.closeInventory();
                         player.sendMessage(net.kyori.adventure.text.Component.text("Connecting to " + itemName + "...")
