@@ -78,11 +78,11 @@ public class RadiumClient {
                 }
                 
                 // Return default profile if not found
-                return new RadiumProfile(playerUuid, "Member", new ArrayList<>(), new HashMap<>());
+                return new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
                 
             } catch (Exception e) {
                 System.err.println("Error fetching player profile from Radium: " + e.getMessage());
-                return new RadiumProfile(playerUuid, "Member", new ArrayList<>(), new HashMap<>());
+                return new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
             }
         });
     }
@@ -149,8 +149,9 @@ public class RadiumClient {
      * This matches Radium's ChatManager format: chat.main_format with prefix, player, chatColor, message
      */
     public CompletableFuture<Component> formatChatMessage(UUID playerUuid, String playerName, String message) {
-        return getPlayerHighestRank(playerUuid).thenApply(rank -> {
+        return getPlayerProfile(playerUuid).thenApply(profile -> {
             try {
+                RadiumRank rank = profile.getHighestRank(this);
                 String prefix = rank.getPrefix();
                 String chatColor = rank.getColor();
                 
@@ -177,7 +178,7 @@ public class RadiumClient {
                 return Component.text("[Member] " + playerName + ": " + message);
             }
         }).exceptionally(throwable -> {
-            System.err.println("[RadiumClient] Failed to get rank for " + playerName + ": " + throwable.getMessage());
+            System.err.println("[RadiumClient] Failed to get profile for " + playerName + ": " + throwable.getMessage());
             // Return fallback formatting
             return Component.text("[Member] " + playerName + ": " + message);
         });
@@ -358,28 +359,67 @@ public class RadiumClient {
     }
     
     /**
-     * Parse profile from JSON
+     * Parse profile from JSON (updated to match Radium's Profile structure)
      */
     private RadiumProfile parseProfile(JsonObject json) {
-        UUID uuid = UUID.fromString(json.get("uuid").getAsString());
-        String primaryRank = json.has("primaryRank") ? json.get("primaryRank").getAsString() : "Member";
-        
-        List<String> ranks = new ArrayList<>();
-        if (json.has("ranks") && json.get("ranks").isJsonArray()) {
-            json.getAsJsonArray("ranks").forEach(element -> ranks.add(element.getAsString()));
+        try {
+            // Extract UUID - it could be stored as "uuid" or "_id"
+            String uuidString = json.has("uuid") ? json.get("uuid").getAsString() : 
+                               json.has("_id") ? json.get("_id").getAsString() : null;
+            if (uuidString == null) {
+                System.err.println("Profile JSON missing UUID field");
+                return null;
+            }
+            UUID uuid = UUID.fromString(uuidString);
+            
+            // Extract username
+            String username = json.has("username") ? json.get("username").getAsString() : "Unknown";
+            
+            // Extract lastSeen
+            long lastSeen = json.has("lastSeen") ? json.get("lastSeen").getAsLong() : System.currentTimeMillis();
+            
+            // Extract ranks - Radium stores this as a Set<String> but in different format
+            List<String> ranks = new ArrayList<>();
+            if (json.has("ranks")) {
+                var ranksElement = json.get("ranks");
+                if (ranksElement.isJsonArray()) {
+                    for (var rankElement : ranksElement.getAsJsonArray()) {
+                        String rankString = rankElement.getAsString();
+                        // Radium stores ranks as "rank|granter|timestamp|expiry", we just want the rank name
+                        String rankName = rankString.split("\\|")[0];
+                        if (!ranks.contains(rankName)) {
+                            ranks.add(rankName);
+                        }
+                    }
+                }
+            }
+            
+            // If no ranks found, add default Member rank
+            if (ranks.isEmpty()) {
+                ranks.add("Member");
+            }
+            
+            // Extract permissions
+            Map<String, Boolean> permissions = new HashMap<>();
+            if (json.has("permissions")) {
+                var permsElement = json.get("permissions");
+                if (permsElement.isJsonArray()) {
+                    for (var permElement : permsElement.getAsJsonArray()) {
+                        String permString = permElement.getAsString();
+                        // Radium stores permissions as "permission|granter|timestamp|expiry", we just want the permission
+                        String permission = permString.split("\\|")[0];
+                        permissions.put(permission, true);
+                    }
+                }
+            }
+            
+            return new RadiumProfile(uuid, username, ranks, permissions, lastSeen);
+            
+        } catch (Exception e) {
+            System.err.println("Error parsing profile JSON: " + e.getMessage());
+            e.printStackTrace();
+            return null;
         }
-        if (ranks.isEmpty()) {
-            ranks.add(primaryRank);
-        }
-        
-        Map<String, Boolean> permissions = new HashMap<>();
-        if (json.has("permissions") && json.get("permissions").isJsonObject()) {
-            JsonObject perms = json.getAsJsonObject("permissions");
-            perms.entrySet().forEach(entry -> 
-                permissions.put(entry.getKey(), entry.getValue().getAsBoolean()));
-        }
-        
-        return new RadiumProfile(uuid, primaryRank, ranks, permissions);
     }
     
     /**
