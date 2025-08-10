@@ -34,6 +34,9 @@ public class RadiumClient {
     private final ConcurrentHashMap<UUID, Long> profileCacheTime = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> rankCacheTime = new ConcurrentHashMap<>();
     
+    // Profile update subscription
+    private boolean subscriptionInitialized = false;
+    
     public RadiumClient(RedisManager redisManager) {
         this.redisManager = redisManager;
         this.gson = new Gson();
@@ -42,6 +45,9 @@ public class RadiumClient {
         
         // Initialize rank cache
         loadRanksFromRedis();
+        
+        // Initialize profile update listener
+        initializeProfileUpdateListener();
     }
     
     /**
@@ -562,5 +568,97 @@ public class RadiumClient {
                 return null;
             }
         });
+    }
+    
+    /**
+     * Initializes Redis subscription for profile updates
+     */
+    private void initializeProfileUpdateListener() {
+        if (subscriptionInitialized) {
+            return;
+        }
+        
+        try {
+            redisManager.subscribe("radium:profile:updated", (channel, message) -> {
+                if ("radium:profile:updated".equals(channel)) {
+                    String playerUuid = message;
+                    System.out.println("[RadiumClient] Received profile update notification for: " + playerUuid);
+                    clearPlayerCacheByUuid(playerUuid);
+                }
+            });
+            
+            subscriptionInitialized = true;
+            System.out.println("[RadiumClient] Profile update listener initialized");
+        } catch (Exception e) {
+            System.err.println("[RadiumClient] Error initializing profile update subscription: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Clear cached profile by UUID
+     */
+    public void clearPlayerCacheByUuid(String playerUuid) {
+        try {
+            UUID uuid = UUID.fromString(playerUuid);
+            RadiumProfile removed = profileCache.remove(uuid);
+            profileCacheTime.remove(uuid);
+            
+            if (removed != null) {
+                System.out.println("[RadiumClient] Cleared cache for player UUID: " + playerUuid);
+            }
+        } catch (Exception e) {
+            System.err.println("[RadiumClient] Error clearing cache for UUID " + playerUuid + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Clear cached profile by username
+     */
+    public void clearPlayerCache(String username) {
+        // Find profile by username and remove it
+        profileCache.entrySet().removeIf(entry -> {
+            // We need to check if we can get the username from the profile
+            // Since RadiumProfile doesn't have a getUsername method, we'll remove by UUID lookup
+            return false; // Will implement once we have username lookup
+        });
+        System.out.println("[RadiumClient] Cache clear requested for player: " + username);
+    }
+
+    /**
+     * Clear all cached profiles
+     */
+    public void clearAllCache() {
+        profileCache.clear();
+        profileCacheTime.clear();
+        rankCache.clear();
+        rankCacheTime.clear();
+        System.out.println("[RadiumClient] Cleared all profile and rank cache");
+    }
+
+    /**
+     * Force refresh a player's profile from Redis
+     */
+    public CompletableFuture<RadiumProfile> forceRefreshProfile(UUID playerUuid) {
+        // Clear cache first
+        profileCache.remove(playerUuid);
+        profileCacheTime.remove(playerUuid);
+        
+        // Fetch fresh profile
+        return getPlayerProfile(playerUuid);
+    }
+
+    /**
+     * Shutdown the profile update listener and cleanup resources
+     */
+    public void shutdown() {
+        try {
+            if (subscriptionInitialized) {
+                redisManager.unsubscribe("radium:profile:updated");
+            }
+            clearAllCache();
+            System.out.println("[RadiumClient] Shutdown completed");
+        } catch (Exception e) {
+            System.err.println("[RadiumClient] Error during shutdown: " + e.getMessage());
+        }
     }
 }

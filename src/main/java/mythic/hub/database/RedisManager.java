@@ -4,6 +4,8 @@ import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.sync.RedisCommands;
+import io.lettuce.core.pubsub.StatefulRedisPubSubConnection;
+import io.lettuce.core.pubsub.RedisPubSubListener;
 import mythic.hub.config.DatabaseConfig;
 import mythic.hub.data.PlayerProfile;
 
@@ -12,11 +14,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiConsumer;
 
 public class RedisManager {
     private final RedisClient redisClient;
     private final StatefulRedisConnection<String, String> connection;
     private final RedisCommands<String, String> syncCommands;
+    private final StatefulRedisPubSubConnection<String, String> pubSubConnection;
 
     public RedisManager(DatabaseConfig config) {
         RedisURI redisUri = RedisURI.Builder
@@ -27,6 +31,7 @@ public class RedisManager {
         this.redisClient = RedisClient.create(redisUri);
         this.connection = redisClient.connect();
         this.syncCommands = connection.sync();
+        this.pubSubConnection = redisClient.connectPubSub();
     }
 
     public CompletableFuture<PlayerProfile> loadPlayerProfile(UUID uuid, String username) {
@@ -137,9 +142,77 @@ public class RedisManager {
         syncCommands.publish(channel, message);
     }
     
+    /**
+     * Subscribe to a Redis channel with a message handler
+     * @param channel The channel to subscribe to
+     * @param messageHandler Handler for received messages (channel, message)
+     */
+    public void subscribe(String channel, BiConsumer<String, String> messageHandler) {
+        pubSubConnection.addListener(new RedisPubSubListener<String, String>() {
+            @Override
+            public void message(String channel, String message) {
+                messageHandler.accept(channel, message);
+            }
+
+            @Override
+            public void message(String pattern, String channel, String message) {
+                // Pattern messages handled here if needed
+            }
+
+            @Override
+            public void subscribed(String channel, long count) {
+                System.out.println("[RedisManager] Subscribed to channel: " + channel);
+            }
+
+            @Override
+            public void psubscribed(String pattern, long count) {
+                // Pattern subscription
+            }
+
+            @Override
+            public void unsubscribed(String channel, long count) {
+                System.out.println("[RedisManager] Unsubscribed from channel: " + channel);
+            }
+
+            @Override
+            public void punsubscribed(String pattern, long count) {
+                // Pattern unsubscription
+            }
+        });
+        
+        pubSubConnection.async().subscribe(channel);
+    }
+    
+    /**
+     * Unsubscribe from a Redis channel
+     * @param channel The channel to unsubscribe from
+     */
+    public void unsubscribe(String channel) {
+        pubSubConnection.async().unsubscribe(channel);
+    }
+    
     // Get keys matching a pattern
     public Set<String> getKeys(String pattern) {
         List<String> keysList = syncCommands.keys(pattern);
         return Set.copyOf(keysList);
+    }
+    
+    /**
+     * Shutdown and close all Redis connections
+     */
+    public void shutdown() {
+        try {
+            if (pubSubConnection != null) {
+                pubSubConnection.close();
+            }
+            if (connection != null) {
+                connection.close();
+            }
+            if (redisClient != null) {
+                redisClient.shutdown();
+            }
+        } catch (Exception e) {
+            System.err.println("Error shutting down RedisManager: " + e.getMessage());
+        }
     }
 }

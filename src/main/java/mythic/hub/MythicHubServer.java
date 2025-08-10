@@ -90,6 +90,9 @@ public class MythicHubServer {
         // Add shutdown hook
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             System.out.println("Shutting down MythicHub Server...");
+            if (radiumClient != null) {
+                radiumClient.shutdown();
+            }
             if (playerDataManager != null) {
                 playerDataManager.shutdown();
             }
