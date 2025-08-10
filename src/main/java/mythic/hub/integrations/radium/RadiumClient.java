@@ -54,19 +54,26 @@ public class RadiumClient {
      * Get a player's profile from Radium
      */
     public CompletableFuture<RadiumProfile> getPlayerProfile(UUID playerUuid) {
+        System.out.println("[RadiumClient] Fetching profile for player: " + playerUuid);
+        
         // Check cache first
         RadiumProfile cached = profileCache.get(playerUuid);
         Long cacheTime = profileCacheTime.get(playerUuid);
         
         if (cached != null && cacheTime != null && 
             (System.currentTimeMillis() - cacheTime) < CACHE_DURATION) {
+            System.out.println("[RadiumClient] Returning cached profile: " + cached.getUsername() + " with ranks: " + cached.getRanks());
             return CompletableFuture.completedFuture(cached);
         }
         
         return CompletableFuture.supplyAsync(() -> {
             try {
-                String profileData = redisManager.get("radium:profile:" + playerUuid.toString());
+                String redisKey = "radium:profile:" + playerUuid.toString();
+                System.out.println("[RadiumClient] Looking for profile in Redis with key: " + redisKey);
+                
+                String profileData = redisManager.get(redisKey);
                 if (profileData != null) {
+                    System.out.println("[RadiumClient] Found profile data in Redis: " + profileData);
                     JsonObject json = JsonParser.parseString(profileData).getAsJsonObject();
                     RadiumProfile profile = parseProfile(json);
                     
@@ -74,15 +81,30 @@ public class RadiumClient {
                     profileCache.put(playerUuid, profile);
                     profileCacheTime.put(playerUuid, System.currentTimeMillis());
                     
+                    System.out.println("[RadiumClient] Parsed and cached profile: " + profile.getUsername() + " with ranks: " + profile.getRanks());
                     return profile;
+                } else {
+                    System.out.println("[RadiumClient] No profile data found in Redis for key: " + redisKey);
+                    
+                    // Let's also try to see what profile keys exist
+                    Set<String> allProfileKeys = redisManager.getKeys("radium:profile:*");
+                    System.out.println("[RadiumClient] Available profile keys in Redis: " + allProfileKeys.size() + " keys found");
+                    if (allProfileKeys.size() <= 10) {
+                        System.out.println("[RadiumClient] Profile keys: " + allProfileKeys);
+                    }
                 }
                 
                 // Return default profile if not found
-                return new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
+                RadiumProfile defaultProfile = new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
+                System.out.println("[RadiumClient] Returning default profile: " + defaultProfile.getUsername() + " with ranks: " + defaultProfile.getRanks());
+                return defaultProfile;
                 
             } catch (Exception e) {
                 System.err.println("Error fetching player profile from Radium: " + e.getMessage());
-                return new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
+                e.printStackTrace();
+                RadiumProfile defaultProfile = new RadiumProfile(playerUuid, "Unknown", List.of("Member"), Map.of(), System.currentTimeMillis());
+                System.out.println("[RadiumClient] Returning default profile due to error: " + defaultProfile.getUsername() + " with ranks: " + defaultProfile.getRanks());
+                return defaultProfile;
             }
         });
     }
@@ -91,18 +113,25 @@ public class RadiumClient {
      * Get a rank definition from Radium
      */
     public RadiumRank getRank(String rankName) {
+        System.out.println("[RadiumClient] Fetching rank: " + rankName);
+        
         RadiumRank cached = rankCache.get(rankName.toLowerCase());
         Long cacheTime = rankCacheTime.get(rankName.toLowerCase());
         
         if (cached != null && cacheTime != null && 
             (System.currentTimeMillis() - cacheTime) < CACHE_DURATION) {
+            System.out.println("[RadiumClient] Returning cached rank: " + cached);
             return cached;
         }
         
         // Load from Redis
         try {
-            String rankData = redisManager.get("radium:rank:" + rankName.toLowerCase());
+            String redisKey = "radium:rank:" + rankName.toLowerCase();
+            System.out.println("[RadiumClient] Looking for rank in Redis with key: " + redisKey);
+            
+            String rankData = redisManager.get(redisKey);
             if (rankData != null) {
+                System.out.println("[RadiumClient] Found rank data in Redis: " + rankData);
                 JsonObject json = JsonParser.parseString(rankData).getAsJsonObject();
                 RadiumRank rank = parseRank(json);
                 
@@ -110,14 +139,24 @@ public class RadiumClient {
                 rankCache.put(rankName.toLowerCase(), rank);
                 rankCacheTime.put(rankName.toLowerCase(), System.currentTimeMillis());
                 
+                System.out.println("[RadiumClient] Parsed and cached rank: " + rank);
                 return rank;
+            } else {
+                System.out.println("[RadiumClient] No rank data found in Redis for key: " + redisKey);
+                
+                // Let's also try to see what keys exist
+                Set<String> allRankKeys = redisManager.getKeys("radium:rank:*");
+                System.out.println("[RadiumClient] Available rank keys in Redis: " + allRankKeys);
             }
         } catch (Exception e) {
             System.err.println("Error fetching rank from Radium: " + e.getMessage());
+            e.printStackTrace();
         }
         
         // Return default rank if not found
-        return new RadiumRank("Member", "&a[Member] ", 10, "&f", new HashSet<>(), new ArrayList<>());
+        RadiumRank defaultRank = new RadiumRank("Member", "&a[Member] ", 10, "&f", new HashSet<>(), new ArrayList<>());
+        System.out.println("[RadiumClient] Returning default rank: " + defaultRank);
+        return defaultRank;
     }
     
     /**

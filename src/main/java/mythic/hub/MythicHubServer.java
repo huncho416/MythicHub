@@ -18,6 +18,7 @@ import net.minestom.server.item.ItemComponent;
 import net.minestom.server.item.Material;
 import mythic.hub.commands.ChatCommands;
 import mythic.hub.commands.TagCommand;
+import mythic.hub.debug.RadiumDebugCommand;
 import mythic.hub.config.DatabaseConfig;
 import mythic.hub.config.VelocityConfig;
 import mythic.hub.config.VersionConfig;
@@ -83,6 +84,7 @@ public class MythicHubServer {
         MinecraftServer.getCommandManager().register(new FriendsCommand());
         MinecraftServer.getCommandManager().register(new ServerCommand());
         MinecraftServer.getCommandManager().register(new mythic.hub.commands.RadiumTestCommand());
+        MinecraftServer.getCommandManager().register(new RadiumDebugCommand());
         
         // Register staff command forwarders for Radium integration
         registerStaffCommands();
