@@ -15,8 +15,8 @@ public class DatabaseConfig {
         // Updated configuration to match Radium database settings
         this.mongoHost = "localhost";
         this.mongoPort = 27017;
-        this.mongoUsername = "radium_user";
-        this.mongoPassword = "HKtsu0ByCvIQ0UYZlEBmZ9o3";
+        this.mongoUsername = null; // No authentication required
+        this.mongoPassword = null; // No authentication required
         this.mongoDatabase = "radium";
         this.redisHost = "localhost";
         this.redisPort = 6379;
@@ -36,7 +36,11 @@ public class DatabaseConfig {
     public String getRedisPassword() { return redisPassword; }
 
     public String getMongoConnectionString() {
-        return String.format("mongodb://%s:%s@%s:%d/%s", mongoUsername, mongoPassword, mongoHost, mongoPort, mongoDatabase);
+        if (mongoUsername != null && mongoPassword != null) {
+            return String.format("mongodb://%s:%s@%s:%d/%s", mongoUsername, mongoPassword, mongoHost, mongoPort, mongoDatabase);
+        } else {
+            return String.format("mongodb://%s:%d/%s", mongoHost, mongoPort, mongoDatabase);
+        }
     }
 
     public String getRedisConnectionString() {

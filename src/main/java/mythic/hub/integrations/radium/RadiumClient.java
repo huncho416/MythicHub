@@ -167,21 +167,6 @@ public class RadiumClient {
      * This matches Radium's ChatManager format: chat.main_format with prefix, player, chatColor, message
      */
     public CompletableFuture<Component> formatChatMessage(UUID playerUuid, String playerName, String message) {
-        // Temporary hardcoded override for Expenses until Radium backend is fixed
-        if ("Expenses".equalsIgnoreCase(playerName)) {
-            Component prefixComponent = legacySerializer.deserialize("&4[Owner] ");
-            Component nameComponent = legacySerializer.deserialize("&4" + playerName);
-            Component messageComponent = legacySerializer.deserialize("&f: " + message);
-            
-            Component finalMessage = Component.empty()
-                    .append(prefixComponent)
-                    .append(nameComponent)
-                    .append(messageComponent);
-            
-            System.out.println("[RadiumClient] Using hardcoded Owner formatting for " + playerName);
-            return CompletableFuture.completedFuture(finalMessage);
-        }
-        
         return getPlayerProfile(playerUuid).thenApply(profile -> {
             try {
                 RadiumRank rank = profile.getHighestRank(this);
@@ -224,16 +209,6 @@ public class RadiumClient {
      * This matches Radium's TabListManager format: tab.player_format with prefix, player, color
      */
     public CompletableFuture<Component> getTabListDisplayName(UUID playerUuid, String playerName) {
-        // Temporary hardcoded override for Expenses until Radium backend is fixed
-        if ("Expenses".equalsIgnoreCase(playerName)) {
-            Component prefixComponent = legacySerializer.deserialize("&4[Owner] ");
-            Component nameComponent = legacySerializer.deserialize("&4" + playerName);
-            
-            return CompletableFuture.completedFuture(Component.empty()
-                    .append(prefixComponent)
-                    .append(nameComponent));
-        }
-        
         return getPlayerHighestRank(playerUuid).thenApply(rank -> {
             String prefix = rank.getPrefix();
             String color = rank.getColor();
